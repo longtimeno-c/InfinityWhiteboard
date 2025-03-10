@@ -21,7 +21,7 @@
         #whiteboard {
             border: 1px solid #000;
             cursor: crosshair;
-            touch-action: none; /* Prevent default touch scrolling */
+            touch-action: none;
         }
         #status {
             position: fixed;
@@ -32,24 +32,41 @@
         }
         .connected { background: #90ee90; }
         .disconnected { background: #ff9999; }
+        .tool-button {
+            padding: 5px 10px;
+            margin: 0 5px;
+            border: 2px solid #ccc;
+            border-radius: 5px;
+            background: #fff;
+            cursor: pointer;
+        }
+        .tool-button.active {
+            background: #4CAF50;
+            color: white;
+            border-color: #4CAF50;
+        }
+        select, input[type="range"] {
+            margin: 0 5px;
+        }
     </style>
 </head>
 <body>
     <div id="toolbar">
-        <button onclick="setTool('pen')">Pen</button>
+        <button id="penTool" class="tool-button active" onclick="setTool('pen')">Pen</button>
         <select id="colorPicker" onchange="setColor(this.value)">
             <option value="black">Black</option>
             <option value="red">Red</option>
             <option value="blue">Blue</option>
             <option value="green">Green</option>
         </select>
-        <button onclick="setTool('eraser')">Eraser</button>
-        <button onclick="clearBoard()">Clear</button>
-        <button onclick="undo()">Undo</button>
-        <button onclick="redo()">Redo</button>
+        <button id="eraserTool" class="tool-button" onclick="setTool('eraser')">Eraser</button>
+        <button id="panTool" class="tool-button" onclick="setTool('pan')">Pan</button>
+        <button class="tool-button" onclick="clearBoard()">Clear</button>
+        <button class="tool-button" onclick="undo()">Undo</button>
+        <button class="tool-button" onclick="redo()">Redo</button>
         <input type="range" id="size" min="1" max="20" value="2" onchange="setSize(this.value)">
-        <button onclick="zoom(1.2)">Zoom In</button>
-        <button onclick="zoom(0.8)">Zoom Out</button>
+        <button class="tool-button" onclick="zoom(1.2)">Zoom In</button>
+        <button class="tool-button" onclick="zoom(0.8)">Zoom Out</button>
     </div>
     <canvas id="whiteboard"></canvas>
     <div id="status" class="disconnected">Disconnected</div>
@@ -65,14 +82,18 @@
         let lastX, lastY;
         let history = [];
         let redoStack = [];
-        let scale = 1; // Zoom level
-        let offsetX = 0, offsetY = 0; // Translation for panning
-        const GRID_SIZE = 20; // Size of grid squares in virtual coordinates
+        let scale = 1;
+        let offsetX = 0, offsetY = 0;
+        const GRID_SIZE = 20;
 
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
 
-        // Set canvas to full window size
+        // Tool UI elements
+        const penTool = document.getElementById('penTool');
+        const eraserTool = document.getElementById('eraserTool');
+        const panTool = document.getElementById('panTool');
+
         function resizeCanvas() {
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight - document.getElementById('toolbar').offsetHeight;
@@ -83,7 +104,10 @@
 
         function setTool(newTool) {
             tool = newTool;
-            canvas.style.cursor = tool === 'pen' ? 'crosshair' : 'default';
+            canvas.style.cursor = tool === 'pan' ? 'grab' : 'crosshair';
+            penTool.classList.toggle('active', tool === 'pen');
+            eraserTool.classList.toggle('active', tool === 'eraser');
+            panTool.classList.toggle('active', tool === 'pan');
         }
 
         function setColor(newColor) {
@@ -106,48 +130,41 @@
             redraw();
         }
 
-        // Draw squared background
         function drawGrid() {
             ctx.save();
             ctx.setTransform(1, 0, 0, 1, offsetX, offsetY);
             ctx.scale(scale, scale);
 
-            ctx.strokeStyle = '#e0e0e0'; // Light gray grid lines
-            ctx.lineWidth = 0.5 / scale; // Thin lines, adjusted for zoom
+            ctx.strokeStyle = '#e0e0e0';
+            ctx.lineWidth = 0.5 / scale;
 
-            // Calculate visible bounds in virtual coordinates
             const minX = -offsetX / scale;
             const minY = -offsetY / scale;
             const maxX = (canvas.width - offsetX) / scale;
             const maxY = (canvas.height - offsetY) / scale;
 
-            // Draw vertical lines
             for (let x = Math.floor(minX / GRID_SIZE) * GRID_SIZE; x <= maxX; x += GRID_SIZE) {
                 ctx.beginPath();
                 ctx.moveTo(x, minY);
                 ctx.lineTo(x, maxY);
                 ctx.stroke();
             }
-
-            // Draw horizontal lines
             for (let y = Math.floor(minY / GRID_SIZE) * GRID_SIZE; y <= maxY; y += GRID_SIZE) {
                 ctx.beginPath();
                 ctx.moveTo(minX, y);
                 ctx.lineTo(maxX, y);
                 ctx.stroke();
             }
-
             ctx.restore();
         }
 
-        // Pointer events for stylus/touch/mouse support
         canvas.addEventListener('pointerdown', startDrawing);
         canvas.addEventListener('pointermove', draw);
         canvas.addEventListener('pointerup', stopDrawing);
         canvas.addEventListener('pointerleave', stopDrawing);
         canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
-            zoom(e.deltaY > 0 ? 0.9 : 1.1); // Zoom with wheel
+            zoom(e.deltaY > 0 ? 0.9 : 1.1);
         });
 
         function startDrawing(e) {
@@ -157,6 +174,9 @@
             const virtualX = (e.clientX - rect.left - offsetX) / scale;
             const virtualY = (e.clientY - rect.top - offsetY) / scale;
             [lastX, lastY] = [virtualX, virtualY];
+            if (tool === 'pan') {
+                canvas.style.cursor = 'grabbing';
+            }
         }
 
         function draw(e) {
@@ -166,29 +186,24 @@
             const rect = canvas.getBoundingClientRect();
             const virtualX = (e.clientX - rect.left - offsetX) / scale;
             const virtualY = (e.clientY - rect.top - offsetY) / scale;
-            const pressure = e.pressure || 1; // Stylus pressure (0-1), default to 1 if unavailable
+            const pressure = e.pressure || 1;
 
-            if (e.buttons === 4 || (tool === 'pen' && e.buttons === 2)) { // Middle mouse or right-click with pen tool for panning
-                offsetX += e.movementX;
-                offsetY += e.movementY;
-                socket.send(JSON.stringify({
-                    type: 'move',
-                    offsetX,
-                    offsetY
-                }));
-                redraw();
-            } else if (tool === 'pen' && e.buttons === 1) { // Left click or stylus
+            if (tool === 'pen' && e.buttons === 1) {
+                // Improved pen: Quadratic curve for smoother lines
                 ctx.beginPath();
                 ctx.moveTo(lastX * scale + offsetX, lastY * scale + offsetY);
+                const midX = (lastX + virtualX) / 2;
+                const midY = (lastY + virtualY) / 2;
+                ctx.quadraticCurveTo(lastX * scale + offsetX, lastY * scale + offsetY, midX * scale + offsetX, midY * scale + offsetY);
                 ctx.lineTo(virtualX * scale + offsetX, virtualY * scale + offsetY);
                 ctx.strokeStyle = color;
-                ctx.lineWidth = size * scale * pressure; // Adjust line width with pressure
+                ctx.lineWidth = size * scale * pressure;
                 ctx.stroke();
                 socket.send(JSON.stringify({
                     type: 'draw',
                     tool: 'pen',
                     color,
-                    size: size * pressure, // Send pressure-adjusted size
+                    size: size * pressure,
                     lastX,
                     lastY,
                     x: virtualX,
@@ -197,11 +212,11 @@
                 history.push({ type: 'draw', tool: 'pen', color, size: size * pressure, lastX, lastY, x: virtualX, y: virtualY });
                 redoStack = [];
             } else if (tool === 'eraser' && e.buttons === 1) {
-                ctx.globalCompositeOperation = 'destination-out';
+                // Eraser only affects drawing layer
                 ctx.beginPath();
                 ctx.arc(virtualX * scale + offsetX, virtualY * scale + offsetY, size * scale * pressure, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(0,0,0,0)'; // Transparent fill to erase
                 ctx.fill();
-                ctx.globalCompositeOperation = 'source-over';
                 socket.send(JSON.stringify({
                     type: 'draw',
                     tool: 'eraser',
@@ -211,12 +226,24 @@
                 }));
                 history.push({ type: 'draw', tool: 'eraser', size: size * pressure, x: virtualX, y: virtualY });
                 redoStack = [];
+            } else if (tool === 'pan') {
+                offsetX += e.movementX;
+                offsetY += e.movementY;
+                socket.send(JSON.stringify({
+                    type: 'move',
+                    offsetX,
+                    offsetY
+                }));
+                redraw();
             }
             [lastX, lastY] = [virtualX, virtualY];
         }
 
         function stopDrawing(e) {
             drawing = false;
+            if (tool === 'pan') {
+                canvas.style.cursor = 'grab';
+            }
         }
 
         function undo() {
@@ -236,16 +263,23 @@
         }
 
         function redraw() {
+            // Draw grid first (background)
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            drawGrid(); // Draw squared background
-            ctx.save();
-            ctx.setTransform(1, 0, 0, 1, offsetX, offsetY); // Apply pan
-            ctx.scale(scale, scale); // Apply zoom
+            drawGrid();
 
+            // Draw content on top
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, offsetX, offsetY);
+            ctx.scale(scale, scale);
+
+            ctx.globalCompositeOperation = 'source-over'; // Ensure drawing is on top
             history.forEach(action => {
                 if (action.type === 'draw' && action.tool === 'pen') {
                     ctx.beginPath();
                     ctx.moveTo(action.lastX, action.lastY);
+                    const midX = (action.lastX + action.x) / 2;
+                    const midY = (action.lastY + action.y) / 2;
+                    ctx.quadraticCurveTo(action.lastX, action.lastY, midX, midY);
                     ctx.lineTo(action.x, action.y);
                     ctx.strokeStyle = action.color;
                     ctx.lineWidth = action.size;
@@ -257,11 +291,14 @@
                     ctx.fill();
                     ctx.globalCompositeOperation = 'source-over';
                 } else if (action.type === 'clear') {
-                    ctx.clearRect(-Infinity, -Infinity, Infinity, Infinity);
+                    ctx.globalCompositeOperation = 'destination-out';
+                    ctx.fillStyle = 'rgba(0,0,0,1)';
+                    ctx.fillRect(-Infinity, -Infinity, Infinity, Infinity);
+                    ctx.globalCompositeOperation = 'source-over';
                 }
             });
 
-            ctx.restore(); // Reset transform
+            ctx.restore();
         }
 
         // WebSocket connection
@@ -284,6 +321,9 @@
                 if (data.tool === 'pen') {
                     ctx.beginPath();
                     ctx.moveTo(data.lastX * scale + offsetX, data.lastY * scale + offsetY);
+                    const midX = (data.lastX + data.x) / 2;
+                    const midY = (data.lastY + data.y) / 2;
+                    ctx.quadraticCurveTo(data.lastX * scale + offsetX, data.lastY * scale + offsetY, midX * scale + offsetX, midY * scale + offsetY);
                     ctx.lineTo(data.x * scale + offsetX, data.y * scale + offsetY);
                     ctx.strokeStyle = data.color;
                     ctx.lineWidth = data.size * scale;
