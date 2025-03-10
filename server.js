@@ -5,7 +5,7 @@ const fs = require('fs').promises;
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({ server }); // WebSocket on root path
 
 const BOARD_FILE = 'whiteboard.json';
 let boardState = { actions: [] };
@@ -36,12 +36,11 @@ loadBoardState().then(() => {
             try {
                 const data = JSON.parse(message);
 
-                // Handle undo/redo on the server to keep clients in sync
                 if (data.type === 'undo' && boardState.actions.length > 0) {
                     boardState.actions.pop();
                     saveBoardState();
                 } else if (data.type === 'redo') {
-                    // Redo would require a redo stack on the server, skipping for simplicity
+                    // Redo would require a redo stack, omitted for simplicity
                 } else {
                     boardState.actions.push(data);
                     saveBoardState();
@@ -67,11 +66,10 @@ loadBoardState().then(() => {
     // Serve static files (e.g., index.html)
     app.use(express.static('.'));
 
-    // Start the server
-    const PORT = 3000;
+    // Start the server on port 3000
+    const PORT = 3001;
     server.listen(PORT, () => {
-        console.log(`Server running on http://localhost:${PORT}`);
-        console.log(`WebSocket server running on ws://localhost:${PORT}/ws`);
-        console.log(`Expect Caddy to proxy wss://watch.stream150.com/ws to this server`);
+        console.log(`HTTP and WebSocket server running on http://localhost:${PORT}`);
+        console.log(`Expect Caddy to proxy https://watch.stream150.com and wss://watch.stream150.com to this server`);
     });
 });

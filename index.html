@@ -218,10 +218,10 @@
             offsetY = currentOffsetY;
         }
 
-        // Dynamic WebSocket URL based on current host (will be wss://watch.stream150.com/ws)
+        // Connect to WebSocket at root (wss://watch.stream150.com)
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsHost = window.location.host;
-        const socket = new WebSocket(`${wsProtocol}//${wsHost}/ws`);
+        const socket = new WebSocket(`${wsProtocol}//${wsHost}`);
 
         socket.onopen = () => {
             console.log('Connected to WebSocket server');
@@ -265,7 +265,7 @@
                     redraw();
                 }
             } else if (data.type === 'redo') {
-                // Redo would need server-side support for a redo stack
+                // Redo would need server-side support
             }
         };
 
