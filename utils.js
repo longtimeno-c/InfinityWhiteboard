@@ -1,5 +1,5 @@
 function getVirtualCoords(e) {
-    const rect = drawingCanvas.getBoundingClientRect();
+    const rect = canvas.getBoundingClientRect();
     const x = (e.clientX - rect.left - offsetX) / scale;
     const y = (e.clientY - rect.top - offsetY) / scale;
     return { x, y };
@@ -18,26 +18,27 @@ function panBoard(e) {
 }
 
 function drawGrid() {
-    bgCtx.clearRect(0, 0, backgroundCanvas.width, backgroundCanvas.height);
-    bgCtx.strokeStyle = '#e0e0e0';
-    bgCtx.lineWidth = 0.5;
+    gridCtx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
+    gridCtx.strokeStyle = '#e0e0e0';
+    gridCtx.lineWidth = 0.5;
 
-    for (let x = 0; x <= backgroundCanvas.width; x += GRID_SIZE) {
-        bgCtx.beginPath();
-        bgCtx.moveTo(x, 0);
-        bgCtx.lineTo(x, backgroundCanvas.height);
-        bgCtx.stroke();
+    for (let x = 0; x <= gridCanvas.width; x += GRID_SIZE) {
+        gridCtx.beginPath();
+        gridCtx.moveTo(x, 0);
+        gridCtx.lineTo(x, gridCanvas.height);
+        gridCtx.stroke();
     }
-    for (let y = 0; y <= backgroundCanvas.height; y += GRID_SIZE) {
-        bgCtx.beginPath();
-        bgCtx.moveTo(0, y);
-        bgCtx.lineTo(backgroundCanvas.width, y);
-        bgCtx.stroke();
+    for (let y = 0; y <= gridCanvas.height; y += GRID_SIZE) {
+        gridCtx.beginPath();
+        gridCtx.moveTo(0, y);
+        gridCtx.lineTo(gridCanvas.width, y);
+        gridCtx.stroke();
     }
 }
 
 function redraw() {
-    ctx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(gridCanvas, 0, 0); // Composite static grid
     ctx.save();
     ctx.translate(offsetX, offsetY);
     ctx.scale(scale, scale);
@@ -51,12 +52,11 @@ function redraw() {
                 ctx.lineWidth = action.size * points[i].pressure;
                 if (i === 0) {
                     ctx.moveTo(points[i].x, points[i].y);
-                } else if (i < points.length - 1) {
-                    const xc = (points[i].x + points[i + 1].x) / 2;
-                    const yc = (points[i].y + points[i + 1].y) / 2;
-                    ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
                 } else {
-                    ctx.lineTo(points[i].x, points[i].y);
+                    const lastPoint = points[i - 1];
+                    const midX = (lastPoint.x + points[i].x) / 2;
+                    const midY = (lastPoint.y + points[i].y) / 2;
+                    ctx.quadraticCurveTo(lastPoint.x, lastPoint.y, midX, midY);
                 }
             }
             ctx.stroke();
@@ -121,7 +121,7 @@ function setupWebSocket() {
             scale = data.scale || 1;
             offsetX = data.offsetX || 0;
             offsetY = data.offsetY || 0;
-            ctx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
             redraw();
         }
     };

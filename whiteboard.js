@@ -1,14 +1,14 @@
-const backgroundCanvas = document.getElementById('backgroundCanvas');
-const bgCtx = backgroundCanvas.getContext('2d');
-const drawingCanvas = document.getElementById('drawingCanvas');
-const ctx = drawingCanvas.getContext('2d');
+const canvas = document.getElementById('whiteboard');
+const ctx = canvas.getContext('2d');
+const gridCanvas = document.createElement('canvas'); // Offscreen grid
+const gridCtx = gridCanvas.getContext('2d');
 const status = document.getElementById('status');
 
 let tool = 'pen';
 let color = '#000000';
 let size = 2;
 let drawing = false;
-let currentStroke = null; // To store points for the current stroke
+let currentStroke = null;
 let history = [];
 let redoStack = [];
 let scale = 1;
@@ -22,18 +22,18 @@ let rafId = null;
 
 ctx.lineCap = 'round';
 ctx.lineJoin = 'round';
-bgCtx.lineCap = 'round';
-bgCtx.lineJoin = 'round';
+gridCtx.lineCap = 'round';
+gridCtx.lineJoin = 'round';
 
 const penTool = document.getElementById('penTool');
 const eraserTool = document.getElementById('eraserTool');
 const panTool = document.getElementById('panTool');
 
 function resizeCanvas() {
-    backgroundCanvas.width = window.innerWidth;
-    backgroundCanvas.height = window.innerHeight - document.getElementById('toolbar').offsetHeight;
-    drawingCanvas.width = backgroundCanvas.width;
-    drawingCanvas.height = backgroundCanvas.height;
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight - document.getElementById('toolbar').offsetHeight;
+    gridCanvas.width = canvas.width;
+    gridCanvas.height = canvas.height;
     drawGrid();
     redraw();
 }
@@ -42,7 +42,7 @@ resizeCanvas();
 
 function setTool(newTool) {
     tool = newTool;
-    drawingCanvas.style.cursor = tool === 'pan' ? 'grab' : 'crosshair';
+    canvas.style.cursor = tool === 'pan' ? 'grab' : 'crosshair';
     penTool.classList.toggle('active', tool === 'pen');
     eraserTool.classList.toggle('active', tool === 'eraser');
     panTool.classList.toggle('active', tool === 'pan');
@@ -69,17 +69,17 @@ function clearBoardWithConfirm() {
         scale = 1;
         offsetX = 0;
         offsetY = 0;
-        ctx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
         socket.send(JSON.stringify({ type: 'clear', history: [], scale: 1, offsetX: 0, offsetY: 0 }));
         redraw();
     }
 }
 
-drawingCanvas.addEventListener('pointerdown', startDrawing);
-drawingCanvas.addEventListener('pointermove', draw);
-drawingCanvas.addEventListener('pointerup', stopDrawing);
-drawingCanvas.addEventListener('pointerleave', stopDrawing);
-drawingCanvas.addEventListener('wheel', (e) => {
+canvas.addEventListener('pointerdown', startDrawing);
+canvas.addEventListener('pointermove', draw);
+canvas.addEventListener('pointerup', stopDrawing);
+canvas.addEventListener('pointerleave', stopDrawing);
+canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
     zoom(e.deltaY > 0 ? 0.9 : 1.1);
 });
@@ -101,17 +101,9 @@ function startDrawing(e) {
     e.preventDefault();
     drawing = true;
     const { x, y } = getVirtualCoords(e);
-    if (tool === 'pen' || tool === 'eraser') {
-        currentStroke = { type: 'draw', tool, color, size, points: [{ x, y, pressure: e.pressure || 1 }] };
-        ctx.beginPath();
-        ctx.moveTo(x * scale + offsetX, y * scale + offsetY);
-    } else if (tool === 'pan') {
-        drawingCanvas.style.cursor = 'grabbing';
-        prevOffsetX = offsetX;
-        prevOffsetY = offsetY;
-        panVelocityX = 0;
-        panVelocityY = 0;
-    }
+    currentStroke = { type: 'draw', tool, color, size, points: [{ x, y, pressure: e.pressure || 1 }] };
+    ctx.beginPath();
+    ctx.moveTo(x * scale + offsetX, y * scale + offsetY);
 }
 
 function draw(e) {
@@ -124,7 +116,10 @@ function draw(e) {
     if (tool === 'pen') {
         ctx.strokeStyle = color;
         ctx.lineWidth = size * scale * pressure;
-        ctx.lineTo(x * scale + offsetX, y * scale + offsetY);
+        const lastPoint = currentStroke.points[currentStroke.points.length - 1];
+        const midX = (lastPoint.x + x) / 2;
+        const midY = (lastPoint.y + y) / 2;
+        ctx.quadraticCurveTo(lastPoint.x * scale + offsetX, lastPoint.y * scale + offsetY, midX * scale + offsetX, midY * scale + offsetY);
         ctx.stroke();
         currentStroke.points.push({ x, y, pressure });
     } else if (tool === 'eraser') {
@@ -147,11 +142,10 @@ function stopDrawing() {
             history.push(currentStroke);
             redoStack = [];
             socket.send(JSON.stringify({ type: 'update', history, scale, offsetX, offsetY }));
-            redraw();
             currentStroke = null;
         }
     } else if (tool === 'pan') {
-        drawingCanvas.style.cursor = 'grab';
+        canvas.style.cursor = 'grab';
         if (isPanning) {
             isPanning = false;
             requestAnimationFrame(applyPanInertia);
