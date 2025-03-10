@@ -123,6 +123,18 @@ loadBoardState().then(() => {
                     
                     // Broadcast clear command to all clients
                     broadcast(JSON.stringify({ type: 'clear' }));
+                } else if (data.type === 'clear_user') {
+                    // Filter out actions by the specified username
+                    if (data.username) {
+                        boardState.actions = boardState.actions.filter(action => action.username !== data.username);
+                        debouncedSave();
+                        
+                        // Broadcast the clear_user command to all clients
+                        broadcast(JSON.stringify({ 
+                            type: 'clear_user', 
+                            username: data.username 
+                        }));
+                    }
                 } else if (data.type === 'pan' || data.type === 'zoom') {
                     // Don't save view state changes, just broadcast to others
                     broadcast(JSON.stringify(data), ws);

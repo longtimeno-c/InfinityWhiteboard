@@ -11,6 +11,12 @@ const saveUsernameBtn = document.getElementById('save-username-btn');
 const usernameDisplay = document.getElementById('username-display');
 const changeUsernameBtn = document.getElementById('change-username-btn');
 
+// Get references to the clear options modal elements
+const clearOptionsModal = document.getElementById('clear-options-modal');
+const clearOwnBtn = document.getElementById('clear-own-btn');
+const clearAllBtn = document.getElementById('clear-all-btn');
+const cancelClearBtn = document.getElementById('cancel-clear-btn');
+
 let username = ''; // Current username
 let tool = 'pen';
 let color = '#000000';
@@ -157,8 +163,58 @@ function zoom(factor) {
     redraw();
 }
 
+// Add event listeners for the clear options buttons
+clearOwnBtn.addEventListener('click', () => {
+    hideClearOptionsModal();
+    clearUserContent();
+});
+
+clearAllBtn.addEventListener('click', () => {
+    hideClearOptionsModal();
+    clearAllContent();
+});
+
+cancelClearBtn.addEventListener('click', hideClearOptionsModal);
+
+function showClearOptionsModal() {
+    clearOptionsModal.style.display = 'flex';
+}
+
+function hideClearOptionsModal() {
+    clearOptionsModal.style.display = 'none';
+}
+
 function clearBoardWithConfirm() {
-    if (confirm('Are you sure you want to clear the board?')) {
+    // Special handling for user named "Shaun"
+    if (username === "Shaun") {
+        // Show the custom modal with options
+        showClearOptionsModal();
+    } else {
+        // For all other users, just ask if they want to clear their own content
+        if (confirm('Are you sure you want to clear your own content from the board?')) {
+            clearUserContent();
+        }
+    }
+}
+
+function clearUserContent() {
+    // Filter out the current user's strokes from history
+    const filteredHistory = history.filter(stroke => stroke.username !== username);
+    
+    // Send clear user command to server
+    socket.send(JSON.stringify({ 
+        type: 'clear_user', 
+        username: username 
+    }));
+    
+    // Local clear (will be overwritten when server responds)
+    history = filteredHistory;
+    redoStack = [];
+    drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+    redraw();
+}
+
+function clearAllContent() {
         // Send clear command to server
         socket.send(JSON.stringify({ type: 'clear' }));
         
@@ -170,7 +226,6 @@ function clearBoardWithConfirm() {
         offsetY = 0;
         drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
         redraw();
-    }
 }
 
 canvas.addEventListener('pointerdown', startDrawing);
@@ -383,6 +438,9 @@ function initWhiteboard() {
     // Set default tool
     setTool('pen');
     
+    // Initialize the clear options modal
+    hideClearOptionsModal();
+    
     // Force an initial redraw
     setTimeout(() => {
         console.log('Initial whiteboard setup complete');
@@ -473,6 +531,13 @@ function setupWebSocket() {
                 history = [];
                 redoStack = [];
                 redraw();
+            } else if (data.type === 'clear_user') {
+                // Handle clearing a specific user's content
+                if (data.username) {
+                    // Filter out the specified user's strokes
+                    history = history.filter(stroke => stroke.username !== data.username);
+                    redraw();
+                }
             } else if (data.type === 'pan') {
                 // Handle pan updates from other clients
                 offsetX = data.offsetX;

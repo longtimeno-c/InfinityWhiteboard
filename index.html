@@ -57,26 +57,17 @@
         </div>
     </div>
 
-    <div class="tools">
-        <button id="pen-button" class="active">Pen</button>
-        <button id="eraser-button">Eraser</button>
-        <input type="color" id="colorPicker" value="#000000" onchange="setColor(this.value)">
-        <button class="tool-button" data-tooltip="Clear Board" onclick="clearBoardWithConfirm()">
-            <i class="fas fa-trash"></i>
-        </button>
-        <button class="tool-button" data-tooltip="Undo (Ctrl+Z)" onclick="undo()">
-            <i class="fas fa-undo"></i>
-        </button>
-        <button class="tool-button" data-tooltip="Redo (Ctrl+Y)" onclick="redo()">
-            <i class="fas fa-redo"></i>
-        </button>
-        <input type="range" id="size" min="1" max="20" value="2" onchange="setSize(this.value)">
-        <button class="tool-button" data-tooltip="Zoom In" onclick="zoom(1.2)">
-            <i class="fas fa-search-plus"></i>
-        </button>
-        <button class="tool-button" data-tooltip="Zoom Out" onclick="zoom(0.8)">
-            <i class="fas fa-search-minus"></i>
-        </button>
+    <!-- Clear Options Modal for Shaun -->
+    <div id="clear-options-modal" class="modal">
+        <div class="modal-content">
+            <h2>Clear Options</h2>
+            <p>What would you like to clear?</p>
+            <div class="modal-buttons">
+                <button id="clear-own-btn" class="primary-btn">Clear My Content</button>
+                <button id="clear-all-btn" class="danger-btn">Clear All Content</button>
+                <button id="cancel-clear-btn">Cancel</button>
+            </div>
+        </div>
     </div>
 
     <script src="utils.js"></script>
@@ -199,8 +190,8 @@
       }
       
       // Add tool selection buttons
-      const penButton = document.getElementById('pen-button');
-      const eraserButton = document.getElementById('eraser-button');
+      const penButton = document.getElementById('penTool');
+      const eraserButton = document.getElementById('eraserTool');
       
       penButton.addEventListener('click', () => {
         currentTool = 'pen';
