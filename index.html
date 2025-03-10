@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Infinite Whiteboard</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        #toolbar {
+            padding: 10px;
+            background: #f0f0f0;
+            width: 100%;
+            text-align: center;
+        }
+        #whiteboard {
+            border: 1px solid #000;
+            cursor: crosshair;
+        }
+        #status {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            padding: 5px 10px;
+            border-radius: 3px;
+        }
+        .connected { background: #90ee90; }
+        .disconnected { background: #ff9999; }
+    </style>
+</head>
+<body>
+    <div id="toolbar">
+        <button onclick="setTool('pen')">Pen</button>
+        <select id="colorPicker" onchange="setColor(this.value)">
+            <option value="black">Black</option>
+            <option value="red">Red</option>
+            <option value="blue">Blue</option>
+            <option value="green">Green</option>
+        </select>
+        <button onclick="setTool('eraser')">Eraser</button>
+        <button onclick="setTool('move')">Move</button>
+        <button onclick="clearBoard()">Clear</button>
+        <button onclick="undo()">Undo</button>
+        <button onclick="redo()">Redo</button>
+        <input type="range" id="size" min="1" max="20" value="2" onchange="setSize(this.value)">
+    </div>
+    <canvas id="whiteboard"></canvas>
+    <div id="status" class="disconnected">Disconnected</div>
+
+    <script>
+        const canvas = document.getElementById('whiteboard');
+        const ctx = canvas.getContext('2d');
+        const status = document.getElementById('status');
+        let tool = 'pen';
+        let color = 'black';
+        let size = 2;
+        let drawing = false;
+        let lastX, lastY;
+        let offsetX = 0, offsetY = 0;
+        let history = [];
+        let redoStack = [];
+
+        // Canvas setup
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        function resizeCanvas() {
+            const temp = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            canvas.width = window.innerWidth * 0.9;
+            canvas.height = window.innerHeight * 0.8;
+            ctx.putImageData(temp, 0, 0);
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Tool functions
+        function setTool(newTool) {
+            tool = newTool;
+            canvas.style.cursor = tool === 'move' ? 'grab' : 'crosshair';
+        }
+
+        function setColor(newColor) {
+            color = newColor;
+        }
+
+        function setSize(newSize) {
+            size = parseInt(newSize);
+        }
+
+        function clearBoard() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            socket.send(JSON.stringify({ type: 'clear' }));
+            history.push({ type: 'clear' });
+            redoStack = [];
+        }
+
+        // Drawing events
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', stopDrawing);
+        canvas.addEventListener('mouseout', stopDrawing);
+
+        function startDrawing(e) {
+            drawing = true;
+            const rect = canvas.getBoundingClientRect();
+            [lastX, lastY] = [e.clientX - rect.left - offsetX, e.clientY - rect.top - offsetY];
+            if (tool === 'move') {
+                canvas.style.cursor = 'grabbing';
+            }
+        }
+
+        function draw(e) {
+            if (!drawing) return;
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left - offsetX;
+            const y = e.clientY - rect.top - offsetY;
+
+            if (tool === 'pen') {
+                ctx.beginPath();
+                ctx.moveTo(lastX, lastY);
+                ctx.lineTo(x, y);
+                ctx.strokeStyle = color;
+                ctx.lineWidth = size;
+                ctx.stroke();
+                socket.send(JSON.stringify({
+                    type: 'draw',
+                    tool: 'pen',
+                    color,
+                    size,
+                    lastX,
+                    lastY,
+                    x,
+                    y
+                }));
+                history.push({ type: 'draw', tool: 'pen', color, size, lastX, lastY, x, y });
+                redoStack = [];
+            } else if (tool === 'eraser') {
+                ctx.globalCompositeOperation = 'destination-out';
+                ctx.beginPath();
+                ctx.arc(x, y, size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalCompositeOperation = 'source-over';
+                socket.send(JSON.stringify({
+                    type: 'draw',
+                    tool: 'eraser',
+                    size,
+                    x,
+                    y
+                }));
+                history.push({ type: 'draw', tool: 'eraser', size, x, y });
+                redoStack = [];
+            } else if (tool === 'move') {
+                offsetX += e.movementX;
+                offsetY += e.movementY;
+                ctx.setTransform(1, 0, 0, 1, offsetX, offsetY);
+                socket.send(JSON.stringify({
+                    type: 'move',
+                    offsetX,
+                    offsetY
+                }));
+            }
+            [lastX, lastY] = [x, y];
+        }
+
+        function stopDrawing() {
+            drawing = false;
+            if (tool === 'move') {
+                canvas.style.cursor = 'grab';
+            }
+        }
+
+        // Undo/Redo
+        function undo() {
+            if (history.length === 0) return;
+            const action = history.pop();
+            redoStack.push(action);
+            socket.send(JSON.stringify({ type: 'undo' }));
+            redraw();
+        }
+
+        function redo() {
+            if (redoStack.length === 0) return;
+            const action = redoStack.pop();
+            history.push(action);
+            socket.send(JSON.stringify({ type: 'redo' }));
+            redraw();
+        }
+
+        function redraw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            let currentOffsetX = 0, currentOffsetY = 0;
+
+            history.forEach(action => {
+                if (action.type === 'draw' && action.tool === 'pen') {
+                    ctx.beginPath();
+                    ctx.moveTo(action.lastX, action.lastY);
+                    ctx.lineTo(action.x, action.y);
+                    ctx.strokeStyle = action.color;
+                    ctx.lineWidth = action.size;
+                    ctx.stroke();
+                } else if (action.type === 'draw' && action.tool === 'eraser') {
+                    ctx.globalCompositeOperation = 'destination-out';
+                    ctx.beginPath();
+                    ctx.arc(action.x, action.y, action.size, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.globalCompositeOperation = 'source-over';
+                } else if (action.type === 'move') {
+                    currentOffsetX = action.offsetX;
+                    currentOffsetY = action.offsetY;
+                } else if (action.type === 'clear') {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                }
+            });
+            ctx.setTransform(1, 0, 0, 1, currentOffsetX, currentOffsetY);
+            offsetX = currentOffsetX;
+            offsetY = currentOffsetY;
+        }
+
+        // WebSocket
+        const socket = new WebSocket('ws://localhost:3001');
+
+        socket.onopen = () => {
+            console.log('Connected to WebSocket server');
+            status.textContent = 'Connected';
+            status.className = 'connected';
+        };
+
+        socket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === 'init') {
+                history = data.state.actions;
+                redraw();
+            } else if (data.type === 'draw') {
+                if (data.tool === 'pen') {
+                    ctx.beginPath();
+                    ctx.moveTo(data.lastX, data.lastY);
+                    ctx.lineTo(data.x, data.y);
+                    ctx.strokeStyle = data.color;
+                    ctx.lineWidth = data.size;
+                    ctx.stroke();
+                } else if (data.tool === 'eraser') {
+                    ctx.globalCompositeOperation = 'destination-out';
+                    ctx.beginPath();
+                    ctx.arc(data.x, data.y, data.size, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.globalCompositeOperation = 'source-over';
+                }
+            } else if (data.type === 'move') {
+                offsetX = data.offsetX;
+                offsetY = data.offsetY;
+                ctx.setTransform(1, 0, 0, 1, offsetX, offsetY);
+            } else if (data.type === 'clear') {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            } else if (data.type === 'undo' || data.type === 'redo') {
+                redraw();
+            }
+        };
+
+        socket.onclose = () => {
+            console.log('Disconnected from WebSocket server');
+            status.textContent = 'Disconnected';
+            status.className = 'disconnected';
+        };
+
+        socket.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            status.textContent = 'Error';
+            status.className = 'disconnected';
+        };
+    </script>
+</body>
+</html>
