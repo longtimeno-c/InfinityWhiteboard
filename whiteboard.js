@@ -140,11 +140,36 @@ function draw(e) {
         ctx.stroke();
         currentStroke.points.push({ x, y, pressure });
     } else if (tool === 'eraser') {
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.beginPath();
-        ctx.arc(x * scale + offsetX, y * scale + offsetY, size * scale * pressure, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalCompositeOperation = 'source-over';
+        const eraserSize = size * 2; // Make eraser slightly larger than pen
+        
+        // Only apply eraser to the drawing canvas
+        drawingCtx.save();
+        drawingCtx.globalCompositeOperation = 'destination-out';
+        drawingCtx.beginPath();
+        
+        // Draw a path between points for continuous erasing
+        if (currentStroke.points.length > 0) {
+            const lastPoint = currentStroke.points[currentStroke.points.length - 1];
+            drawingCtx.moveTo(lastPoint.x * scale + offsetX, lastPoint.y * scale + offsetY);
+            drawingCtx.lineTo(x * scale + offsetX, y * scale + offsetY);
+            drawingCtx.lineWidth = eraserSize * scale * pressure;
+            drawingCtx.lineCap = 'round';
+            drawingCtx.stroke();
+        }
+        
+        // Add circular cap at current point for better erasing
+        drawingCtx.beginPath();
+        drawingCtx.arc(x * scale + offsetX, y * scale + offsetY, (eraserSize/2) * scale * pressure, 0, Math.PI * 2);
+        drawingCtx.fill();
+        
+        drawingCtx.restore();
+        
+        // Clear the main canvas and redraw from drawing canvas
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(drawingCanvas, 0, 0);
+        
+        currentStroke.type = 'erase'; // Make sure type is set to erase
+        currentStroke.size = eraserSize; // Store the larger eraser size
         currentStroke.points.push({ x, y, pressure });
     } else if (tool === 'pan') {
         panBoard(e);
