@@ -74,6 +74,8 @@
     <script>
         const canvas = document.getElementById('whiteboard');
         const ctx = canvas.getContext('2d');
+        const drawingCanvas = document.createElement('canvas');
+        const drawingCtx = drawingCanvas.getContext('2d');
         const status = document.getElementById('status');
         let tool = 'pen';
         let color = 'black';
@@ -84,12 +86,17 @@
         let redoStack = [];
         let scale = 1;
         let offsetX = 0, offsetY = 0;
+        let prevOffsetX = 0, prevOffsetY = 0;
         const GRID_SIZE = 20;
+        let isPanning = false;
+        let panRafId = null;
+        const SMOOTHING_FACTOR = 0.5;
 
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
+        drawingCtx.lineCap = 'round';
+        drawingCtx.lineJoin = 'round';
 
-        // Tool UI elements
         const penTool = document.getElementById('penTool');
         const eraserTool = document.getElementById('eraserTool');
         const panTool = document.getElementById('panTool');
@@ -97,6 +104,8 @@
         function resizeCanvas() {
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight - document.getElementById('toolbar').offsetHeight;
+            drawingCanvas.width = canvas.width;
+            drawingCanvas.height = canvas.height;
             redraw();
         }
         window.addEventListener('resize', resizeCanvas);
@@ -120,6 +129,7 @@
 
         function zoom(factor) {
             scale *= factor;
+            socket.send(JSON.stringify({ type: 'zoom', scale }));
             redraw();
         }
 
@@ -129,8 +139,10 @@
             scale = 1;
             offsetX = 0;
             offsetY = 0;
+            drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
             socket.send(JSON.stringify({ 
                 type: 'clear',
+                history: [],
                 scale: 1,
                 offsetX: 0,
                 offsetY: 0
@@ -184,6 +196,8 @@
             [lastX, lastY] = [virtualX, virtualY];
             if (tool === 'pan') {
                 canvas.style.cursor = 'grabbing';
+                prevOffsetX = offsetX;
+                prevOffsetY = offsetY;
             }
         }
 
@@ -197,67 +211,66 @@
             const pressure = e.pressure || 1;
 
             if (tool === 'pen' && e.buttons === 1) {
-                ctx.beginPath();
-                ctx.moveTo(lastX * scale + offsetX, lastY * scale + offsetY);
+                drawingCtx.beginPath();
+                drawingCtx.moveTo(lastX * scale + offsetX, lastY * scale + offsetY);
                 const midX = (lastX + virtualX) / 2;
                 const midY = (lastY + virtualY) / 2;
-                ctx.quadraticCurveTo(lastX * scale + offsetX, lastY * scale + offsetY, midX * scale + offsetX, midY * scale + offsetY);
-                ctx.lineTo(virtualX * scale + offsetX, virtualY * scale + offsetY);
-                ctx.strokeStyle = color;
-                ctx.lineWidth = size * scale * pressure;
-                ctx.stroke();
-                socket.send(JSON.stringify({
-                    type: 'draw',
-                    tool: 'pen',
-                    color,
-                    size: size * pressure,
-                    lastX,
-                    lastY,
-                    x: virtualX,
-                    y: virtualY
-                }));
-                history.push({ type: 'draw', tool: 'pen', color, size: size * pressure, lastX, lastY, x: virtualX, y: virtualY });
+                drawingCtx.quadraticCurveTo(lastX * scale + offsetX, lastY * scale + offsetY, midX * scale + offsetX, midY * scale + offsetY);
+                drawingCtx.lineTo(virtualX * scale + offsetX, virtualY * scale + offsetY);
+                drawingCtx.strokeStyle = color;
+                drawingCtx.lineWidth = size * scale * pressure;
+                drawingCtx.stroke();
+                const action = { type: 'draw', tool: 'pen', color, size: size * pressure, lastX, lastY, x: virtualX, y: virtualY };
+                history.push(action);
                 redoStack = [];
+                socket.send(JSON.stringify({ type: 'update', history, scale, offsetX, offsetY }));
             } else if (tool === 'eraser' && e.buttons === 1) {
-                ctx.globalCompositeOperation = 'destination-out';
-                ctx.beginPath();
-                ctx.arc(virtualX * scale + offsetX, virtualY * scale + offsetY, size * scale * pressure, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.globalCompositeOperation = 'source-over';
-                socket.send(JSON.stringify({
-                    type: 'draw',
-                    tool: 'eraser',
-                    size: size * pressure,
-                    x: virtualX,
-                    y: virtualY
-                }));
-                history.push({ type: 'draw', tool: 'eraser', size: size * pressure, x: virtualX, y: virtualY });
+                drawingCtx.globalCompositeOperation = 'destination-out';
+                drawingCtx.beginPath();
+                drawingCtx.arc(virtualX * scale + offsetX, virtualY * scale + offsetY, size * scale * pressure, 0, Math.PI * 2);
+                drawingCtx.fill();
+                drawingCtx.globalCompositeOperation = 'source-over';
+                const action = { type: 'draw', tool: 'eraser', size: size * pressure, x: virtualX, y: virtualY };
+                history.push(action);
                 redoStack = [];
+                socket.send(JSON.stringify({ type: 'update', history, scale, offsetX, offsetY }));
             } else if (tool === 'pan') {
-                offsetX += e.movementX;
-                offsetY += e.movementY;
-                socket.send(JSON.stringify({
-                    type: 'move',
-                    offsetX,
-                    offsetY
-                }));
-                redraw();
+                isPanning = true;
+                const deltaX = e.movementX;
+                const deltaY = e.movementY;
+                offsetX = prevOffsetX + (deltaX * SMOOTHING_FACTOR);
+                offsetY = prevOffsetY + (deltaY * SMOOTHING_FACTOR);
+                prevOffsetX = offsetX;
+                prevOffsetY = offsetY;
+                socket.send(JSON.stringify({ type: 'update', history, scale, offsetX, offsetY }));
+                if (!panRafId) {
+                    panRafId = requestAnimationFrame(() => {
+                        redraw();
+                        panRafId = null;
+                    });
+                }
             }
             [lastX, lastY] = [virtualX, virtualY];
+            if (tool !== 'pan') redraw();
         }
 
         function stopDrawing(e) {
             drawing = false;
             if (tool === 'pan') {
                 canvas.style.cursor = 'grab';
+                isPanning = false;
+                if (panRafId) {
+                    cancelAnimationFrame(panRafId);
+                    panRafId = null;
+                }
             }
         }
 
         function undo() {
             if (history.length === 0) return;
-            socket.send(JSON.stringify({ type: 'undo' }));
             const action = history.pop();
             redoStack.push(action);
+            socket.send(JSON.stringify({ type: 'update', history, scale, offsetX, offsetY }));
             redraw();
         }
 
@@ -265,40 +278,41 @@
             if (redoStack.length === 0) return;
             const action = redoStack.pop();
             history.push(action);
-            socket.send(JSON.stringify({ type: 'redo' }));
+            socket.send(JSON.stringify({ type: 'update', history, scale, offsetX, offsetY }));
             redraw();
         }
 
         function redraw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            drawGrid();
+            drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+            drawingCtx.save();
+            drawingCtx.setTransform(1, 0, 0, 1, offsetX, offsetY);
+            drawingCtx.scale(scale, scale);
 
-            ctx.save();
-            ctx.setTransform(1, 0, 0, 1, offsetX, offsetY);
-            ctx.scale(scale, scale);
-
-            ctx.globalCompositeOperation = 'source-over';
+            drawingCtx.globalCompositeOperation = 'source-over';
             history.forEach(action => {
                 if (action.type === 'draw' && action.tool === 'pen') {
-                    ctx.beginPath();
-                    ctx.moveTo(action.lastX, action.lastY);
+                    drawingCtx.beginPath();
+                    drawingCtx.moveTo(action.lastX, action.lastY);
                     const midX = (action.lastX + action.x) / 2;
                     const midY = (action.lastY + action.y) / 2;
-                    ctx.quadraticCurveTo(action.lastX, action.lastY, midX, midY);
-                    ctx.lineTo(action.x, action.y);
-                    ctx.strokeStyle = action.color;
-                    ctx.lineWidth = action.size;
-                    ctx.stroke();
+                    drawingCtx.quadraticCurveTo(action.lastX, action.lastY, midX, midY);
+                    drawingCtx.lineTo(action.x, action.y);
+                    drawingCtx.strokeStyle = action.color;
+                    drawingCtx.lineWidth = action.size;
+                    drawingCtx.stroke();
                 } else if (action.type === 'draw' && action.tool === 'eraser') {
-                    ctx.globalCompositeOperation = 'destination-out';
-                    ctx.beginPath();
-                    ctx.arc(action.x, action.y, action.size, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.globalCompositeOperation = 'source-over';
+                    drawingCtx.globalCompositeOperation = 'destination-out';
+                    drawingCtx.beginPath();
+                    drawingCtx.arc(action.x, action.y, action.size, 0, Math.PI * 2);
+                    drawingCtx.fill();
+                    drawingCtx.globalCompositeOperation = 'source-over';
                 }
             });
+            drawingCtx.restore();
 
-            ctx.restore();
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawGrid();
+            ctx.drawImage(drawingCanvas, 0, 0);
         }
 
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -314,31 +328,17 @@
         socket.onmessage = (event) => {
             const data = JSON.parse(event.data);
             if (data.type === 'init') {
-                history = data.state.actions;
+                history = data.history || [];
+                scale = data.scale || 1;
+                offsetX = data.offsetX || 0;
+                offsetY = data.offsetY || 0;
+                redoStack = [];
                 redraw();
-            } else if (data.type === 'draw') {
-                if (data.tool === 'pen') {
-                    ctx.beginPath();
-                    ctx.moveTo(data.lastX * scale + offsetX, data.lastY * scale + offsetY);
-                    const midX = (data.lastX + data.x) / 2;
-                    const midY = (data.lastY + data.y) / 2;
-                    ctx.quadraticCurveTo(data.lastX * scale + offsetX, data.lastY * scale + offsetY, midX * scale + offsetX, midY * scale + offsetY);
-                    ctx.lineTo(data.x * scale + offsetX, data.y * scale + offsetY);
-                    ctx.strokeStyle = data.color;
-                    ctx.lineWidth = data.size * scale;
-                    ctx.stroke();
-                    history.push({ type: 'draw', tool: 'pen', color: data.color, size: data.size, lastX: data.lastX, lastY: data.lastY, x: data.x, y: data.y });
-                } else if (data.tool === 'eraser') {
-                    ctx.globalCompositeOperation = 'destination-out';
-                    ctx.beginPath();
-                    ctx.arc(data.x * scale + offsetX, data.y * scale + offsetY, data.size * scale, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.globalCompositeOperation = 'source-over';
-                    history.push({ type: 'draw', tool: 'eraser', size: data.size, x: data.x, y: data.y });
-                }
-            } else if (data.type === 'move') {
-                offsetX = data.offsetX;
-                offsetY = data.offsetY;
+            } else if (data.type === 'update') {
+                history = data.history || [];
+                scale = data.scale || 1;
+                offsetX = data.offsetX || 0;
+                offsetY = data.offsetY || 0;
                 redraw();
             } else if (data.type === 'clear') {
                 history = [];
@@ -346,14 +346,8 @@
                 scale = data.scale || 1;
                 offsetX = data.offsetX || 0;
                 offsetY = data.offsetY || 0;
+                drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
                 redraw();
-            } else if (data.type === 'undo') {
-                if (history.length > 0) {
-                    redoStack.push(history.pop());
-                    redraw();
-                }
-            } else if (data.type === 'redo') {
-                // Redo needs server-side support
             }
         };
 
