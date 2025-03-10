@@ -39,7 +39,231 @@
     <canvas id="whiteboard"></canvas>
     <div id="status" class="disconnected">Disconnected</div>
 
+    <div class="tools">
+        <button id="pen-button" class="active">Pen</button>
+        <button id="eraser-button">Eraser</button>
+        <input type="color" id="colorPicker" value="#000000" onchange="setColor(this.value)">
+        <button class="tool-button" data-tooltip="Clear Board" onclick="clearBoardWithConfirm()">
+            <i class="fas fa-trash"></i>
+        </button>
+        <button class="tool-button" data-tooltip="Undo (Ctrl+Z)" onclick="undo()">
+            <i class="fas fa-undo"></i>
+        </button>
+        <button class="tool-button" data-tooltip="Redo (Ctrl+Y)" onclick="redo()">
+            <i class="fas fa-redo"></i>
+        </button>
+        <input type="range" id="size" min="1" max="20" value="2" onchange="setSize(this.value)">
+        <button class="tool-button" data-tooltip="Zoom In" onclick="zoom(1.2)">
+            <i class="fas fa-search-plus"></i>
+        </button>
+        <button class="tool-button" data-tooltip="Zoom Out" onclick="zoom(0.8)">
+            <i class="fas fa-search-minus"></i>
+        </button>
+    </div>
+
     <script src="utils.js"></script>
     <script src="whiteboard.js"></script>
+    <script>
+      // ... existing code ...
+      
+      // Modify your drawing initialization
+      const socket = io();
+      let isDrawing = false;
+      let currentPath = [];
+      let currentTool = 'pen'; // Add tool state (pen or eraser)
+      
+      // Add this to handle initial canvas state
+      socket.on('init-canvas', (drawings) => {
+        // Redraw all existing drawings
+        drawings.forEach(drawing => {
+          if (drawing.type === 'erase') {
+            // Handle eraser strokes
+            drawEraserPath(drawing.path, drawing.width);
+          } else {
+            // Handle regular drawing strokes
+            drawPath(drawing.path, drawing.color, drawing.width);
+          }
+        });
+      });
+      
+      // Improve the drawing function
+      function drawPath(path, color, width) {
+        const ctx = canvas.getContext('2d');
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        
+        ctx.beginPath();
+        if (path.length > 0) {
+          ctx.moveTo(path[0].x, path[0].y);
+            for (let i = 1; i < path.length; i++) {
+              ctx.lineTo(path[i].x, path[i].y);
+            }
+        }
+        ctx.stroke();
+      }
+      
+      // Add a specific eraser function
+      function drawEraserPath(path, width) {
+        const ctx = canvas.getContext('2d');
+        ctx.globalCompositeOperation = 'destination-out'; // This is the key for better erasing
+        ctx.lineWidth = width;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        
+        ctx.beginPath();
+        if (path.length > 0) {
+          ctx.moveTo(path[0].x, path[0].y);
+            for (let i = 1; i < path.length; i++) {
+              ctx.lineTo(path[i].x, path[i].y);
+            }
+        }
+        ctx.stroke();
+        ctx.globalCompositeOperation = 'source-over'; // Reset to default
+      }
+      
+      // Update your mouse/touch event handlers
+      canvas.addEventListener('mousedown', startDrawing);
+      canvas.addEventListener('mousemove', draw);
+      canvas.addEventListener('mouseup', stopDrawing);
+      canvas.addEventListener('mouseout', stopDrawing);
+      
+      // Touch support
+      canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        startDrawing(e.touches[0]);
+      });
+      canvas.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        draw(e.touches[0]);
+      });
+      canvas.addEventListener('touchend', stopDrawing);
+      
+      function startDrawing(e) {
+        isDrawing = true;
+        currentPath = [];
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        currentPath.push({ x, y });
+      }
+      
+      function draw(e) {
+        if (!isDrawing) return;
+        
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        currentPath.push({ x, y });
+        
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear and redraw for smoother experience
+        
+        // Redraw based on tool
+        if (currentTool === 'eraser') {
+          drawEraserPath(currentPath, 20); // Wider eraser
+        } else {
+          drawPath(currentPath, colorPicker.value, 5);
+        }
+      }
+      
+      function stopDrawing() {
+        if (!isDrawing) return;
+        isDrawing = false;
+        
+        // Send the completed path to the server
+        socket.emit('draw', {
+          type: currentTool === 'eraser' ? 'erase' : 'draw',
+          path: currentPath,
+          color: colorPicker.value,
+          width: currentTool === 'eraser' ? 20 : 5
+        });
+      }
+      
+      // Add tool selection buttons
+      const penButton = document.getElementById('pen-button');
+      const eraserButton = document.getElementById('eraser-button');
+      
+      penButton.addEventListener('click', () => {
+        currentTool = 'pen';
+        penButton.classList.add('active');
+        eraserButton.classList.remove('active');
+      });
+      
+      eraserButton.addEventListener('click', () => {
+        currentTool = 'eraser';
+        eraserButton.classList.add('active');
+        penButton.classList.remove('active');
+      });
+      
+      // Handle incoming drawing data
+      socket.on('draw', (data) => {
+        if (data.type === 'erase') {
+          drawEraserPath(data.path, data.width);
+        } else {
+          drawPath(data.path, data.color, data.width);
+        }
+      });
+      
+      // Add cursor outline for eraser
+      let cursorOutline = document.createElement('div');
+      cursorOutline.id = 'cursor-outline';
+      cursorOutline.style.position = 'absolute';
+      cursorOutline.style.border = '1px solid #000';
+      cursorOutline.style.borderRadius = '50%';
+      cursorOutline.style.pointerEvents = 'none'; // Make sure it doesn't interfere with mouse events
+      cursorOutline.style.display = 'none';
+      document.body.appendChild(cursorOutline);
+
+      // Update cursor outline position and visibility
+      canvas.addEventListener('mousemove', updateCursorOutline);
+      canvas.addEventListener('mouseenter', () => {
+        if (currentTool === 'eraser') {
+          cursorOutline.style.display = 'block';
+        }
+      });
+      canvas.addEventListener('mouseleave', () => {
+        cursorOutline.style.display = 'none';
+      });
+
+      function updateCursorOutline(e) {
+        if (currentTool === 'eraser') {
+          const eraserWidth = 20; // Same as your eraser width
+          cursorOutline.style.width = `${eraserWidth}px`;
+          cursorOutline.style.height = `${eraserWidth}px`;
+          cursorOutline.style.left = `${e.clientX - eraserWidth/2}px`;
+          cursorOutline.style.top = `${e.clientY - eraserWidth/2}px`;
+          cursorOutline.style.display = 'block';
+          
+          // Hide the default cursor when using eraser
+          canvas.style.cursor = 'none';
+        } else {
+          cursorOutline.style.display = 'none';
+          canvas.style.cursor = 'default';
+        }
+      }
+
+      // Update tool selection to handle cursor changes
+      penButton.addEventListener('click', () => {
+        currentTool = 'pen';
+        penButton.classList.add('active');
+        eraserButton.classList.remove('active');
+        canvas.style.cursor = 'default';
+        cursorOutline.style.display = 'none';
+      });
+
+      eraserButton.addEventListener('click', () => {
+        currentTool = 'eraser';
+        eraserButton.classList.add('active');
+        penButton.classList.remove('active');
+        canvas.style.cursor = 'none';
+        if (canvas.matches(':hover')) {
+          cursorOutline.style.display = 'block';
+        }
+      });
+      
+      // ... existing code ...
+    </script>
 </body>
 </html>

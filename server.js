@@ -9,6 +9,7 @@ const wss = new WebSocket.Server({ server }); // WebSocket on root path
 
 const BOARD_FILE = 'whiteboard.json';
 let boardState = { actions: [] };
+const drawings = []; // Store all drawings server-side
 
 async function loadBoardState() {
     try {
@@ -32,6 +33,9 @@ loadBoardState().then(() => {
         console.log('New client connected');
         ws.send(JSON.stringify({ type: 'init', state: boardState }));
 
+        // Send existing drawings to new clients
+        ws.send(JSON.stringify({ type: 'init-canvas', drawings }));
+
         ws.on('message', (message) => {
             try {
                 const data = JSON.parse(message);
@@ -44,6 +48,24 @@ loadBoardState().then(() => {
                 } else {
                     boardState.actions.push(data);
                     saveBoardState();
+                }
+
+                // Store the drawing data
+                if (data.type === 'draw') {
+                    drawings.push({
+                        path: data.path,
+                        color: data.color,
+                        width: data.width,
+                        id: ws.id
+                    });
+                } else if (data.type === 'erase') {
+                    // Store eraser strokes separately
+                    drawings.push({
+                        path: data.path,
+                        type: 'erase',
+                        width: data.width,
+                        id: ws.id
+                    });
                 }
 
                 wss.clients.forEach((client) => {
@@ -72,4 +94,10 @@ loadBoardState().then(() => {
         console.log(`HTTP and WebSocket server running on http://localhost:${PORT}`);
         console.log(`Expect Caddy to proxy https://watch.stream150.com and wss://watch.stream150.com to this server`);
     });
+
+    // Add a route to save drawings to a file periodically
+    setInterval(() => {
+        const fs = require('fs');
+        fs.writeFileSync('drawings.json', JSON.stringify(drawings));
+    }, 60000); // Save every minute
 });
