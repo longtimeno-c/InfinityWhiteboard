@@ -5,46 +5,16 @@ function getVirtualCoords(e) {
     return { x, y };
 }
 
-function drawPen(x, y, pressure) {
-    drawingCtx.beginPath();
-    drawingCtx.moveTo(lastX * scale + offsetX, lastY * scale + offsetY);
-    const midX = (lastX + x) / 2;
-    const midY = (lastY + y) / 2;
-    drawingCtx.quadraticCurveTo(lastX * scale + offsetX, lastY * scale + offsetY, midX * scale + offsetX, midY * scale + offsetY);
-    drawingCtx.lineTo(x * scale + offsetX, y * scale + offsetY);
-    drawingCtx.strokeStyle = color;
-    drawingCtx.lineWidth = size * scale * pressure;
-    drawingCtx.stroke();
-    const action = { type: 'draw', tool: 'pen', color, size: size * pressure, lastX, lastY, x, y };
-    history.push(action);
-    redoStack = [];
-    socket.send(JSON.stringify({ type: 'update', history, scale, offsetX, offsetY }));
-}
-
-function drawEraser(x, y, pressure) {
-    drawingCtx.globalCompositeOperation = 'destination-out';
-    drawingCtx.beginPath();
-    drawingCtx.arc(x * scale + offsetX, y * scale + offsetY, size * scale * pressure, 0, Math.PI * 2);
-    drawingCtx.fill();
-    drawingCtx.globalCompositeOperation = 'source-over';
-    const action = { type: 'draw', tool: 'eraser', size: size * pressure, x, y };
-    history.push(action);
-    redoStack = [];
-    socket.send(JSON.stringify({ type: 'update', history, scale, offsetX, offsetY }));
-}
-
 function panBoard(e) {
     isPanning = true;
     const deltaX = e.movementX;
     const deltaY = e.movementY;
     offsetX = prevOffsetX + deltaX;
     offsetY = prevOffsetY + deltaY;
-    panVelocityX = deltaX;
-    panVelocityY = deltaY;
+    panVelocityX = deltaX * 0.5; // Reduce initial velocity for smoother feel
+    panVelocityY = deltaY * 0.5;
     prevOffsetX = offsetX;
     prevOffsetY = offsetY;
-    socket.send(JSON.stringify({ type: 'update', history, scale, offsetX, offsetY }));
-    redraw();
 }
 
 function drawGrid() {
@@ -75,20 +45,22 @@ function drawGrid() {
 }
 
 function redraw() {
+    // Clear and redraw the grid and history
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawGrid();
+    ctx.drawImage(drawingCanvas, 0, 0);
+
+    // Redraw current stroke from history if needed (for undo/redo consistency)
     drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
     drawingCtx.save();
     drawingCtx.setTransform(1, 0, 0, 1, offsetX, offsetY);
     drawingCtx.scale(scale, scale);
 
-    drawingCtx.globalCompositeOperation = 'source-over';
     history.forEach(action => {
         if (action.type === 'draw' && action.tool === 'pen') {
             drawingCtx.beginPath();
             drawingCtx.moveTo(action.lastX, action.lastY);
-            const midX = (action.lastX + action.x) / 2;
-            const midY = (action.lastY + action.y) / 2;
-            drawingCtx.quadraticCurveTo(action.lastX, action.lastY, midX, midY);
-            drawingCtx.lineTo(action.x, action.y);
+            drawingCtx.lineTo(action.x, action.y); // Simplified for performance; can revert to quadraticCurveTo if needed
             drawingCtx.strokeStyle = action.color;
             drawingCtx.lineWidth = action.size;
             drawingCtx.stroke();
@@ -101,10 +73,6 @@ function redraw() {
         }
     });
     drawingCtx.restore();
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    drawGrid();
-    ctx.drawImage(drawingCanvas, 0, 0);
 }
 
 function undo() {

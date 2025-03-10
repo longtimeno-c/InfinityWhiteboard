@@ -17,7 +17,8 @@ let prevOffsetX = 0, prevOffsetY = 0;
 let panVelocityX = 0, panVelocityY = 0;
 let isPanning = false;
 const GRID_SIZE = 20;
-const FRICTION = 0.95;
+const FRICTION = 0.92; // Slightly lower for smoother decay
+let rafId = null; // For throttling redraws
 
 ctx.lineCap = 'round';
 ctx.lineJoin = 'round';
@@ -100,7 +101,10 @@ function startDrawing(e) {
     drawing = true;
     const { x, y } = getVirtualCoords(e);
     [lastX, lastY] = [x, y];
-    if (tool === 'pan') {
+    if (tool === 'pen' || tool === 'eraser') {
+        ctx.beginPath();
+        ctx.moveTo(lastX * scale + offsetX, lastY * scale + offsetY);
+    } else if (tool === 'pan') {
         canvas.style.cursor = 'grabbing';
         prevOffsetX = offsetX;
         prevOffsetY = offsetY;
@@ -117,24 +121,53 @@ function draw(e) {
     const pressure = e.pressure || 1;
 
     if (tool === 'pen' && e.buttons === 1) {
-        drawPen(x, y, pressure);
+        // Draw directly to the main canvas for responsiveness
+        ctx.strokeStyle = color;
+        ctx.lineWidth = size * scale * pressure;
+        ctx.lineTo(x * scale + offsetX, y * scale + offsetY);
+        ctx.stroke();
+        const action = { type: 'draw', tool: 'pen', color, size: size * pressure, lastX, lastY, x, y };
+        history.push(action);
+        redoStack = [];
     } else if (tool === 'eraser' && e.buttons === 1) {
-        drawEraser(x, y, pressure);
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.beginPath();
+        ctx.arc(x * scale + offsetX, y * scale + offsetY, size * scale * pressure, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
+        const action = { type: 'draw', tool: 'eraser', size: size * pressure, x, y };
+        history.push(action);
+        redoStack = [];
     } else if (tool === 'pan') {
         panBoard(e);
+        throttleRedraw();
     }
+
     [lastX, lastY] = [x, y];
-    if (tool !== 'pan') redraw();
 }
 
 function stopDrawing() {
     drawing = false;
-    if (tool === 'pan') {
+    if (tool === 'pen' || tool === 'eraser') {
+        // Composite the current state to the offscreen canvas when the stroke ends
+        drawingCtx.drawImage(canvas, 0, 0);
+        socket.send(JSON.stringify({ type: 'update', history, scale, offsetX, offsetY }));
+        redraw(); // Full redraw to ensure grid and history are in sync
+    } else if (tool === 'pan') {
         canvas.style.cursor = 'grab';
         if (isPanning) {
             isPanning = false;
             requestAnimationFrame(applyPanInertia);
         }
+    }
+}
+
+function throttleRedraw() {
+    if (!rafId) {
+        rafId = requestAnimationFrame(() => {
+            redraw();
+            rafId = null;
+        });
     }
 }
 
@@ -145,7 +178,7 @@ function applyPanInertia() {
         panVelocityX *= FRICTION;
         panVelocityY *= FRICTION;
         socket.send(JSON.stringify({ type: 'update', history, scale, offsetX, offsetY }));
-        redraw();
+        throttleRedraw();
         requestAnimationFrame(applyPanInertia);
     }
 }
