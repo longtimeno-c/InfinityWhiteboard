@@ -3,9 +3,8 @@ const fs = require('fs').promises;
 const wss = new WebSocket.Server({ port: 3001 });
 
 const BOARD_FILE = 'whiteboard.json';
-let boardState = { actions: [] }; // Store all actions for persistence
+let boardState = { actions: [] };
 
-// Load existing board state
 async function loadBoardState() {
     try {
         const data = await fs.readFile(BOARD_FILE, 'utf8');
@@ -15,7 +14,6 @@ async function loadBoardState() {
     }
 }
 
-// Save board state
 async function saveBoardState() {
     try {
         await fs.writeFile(BOARD_FILE, JSON.stringify(boardState));
@@ -28,7 +26,6 @@ loadBoardState().then(() => {
     wss.on('connection', (ws) => {
         console.log('New client connected');
         
-        // Send current board state to new client
         ws.send(JSON.stringify({ type: 'init', state: boardState }));
 
         ws.on('message', (message) => {
@@ -39,7 +36,6 @@ loadBoardState().then(() => {
                 saveBoardState();
             }
 
-            // Broadcast to all clients
             wss.clients.forEach((client) => {
                 if (client.readyState === WebSocket.OPEN) {
                     client.send(JSON.stringify(data));

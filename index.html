@@ -65,7 +65,6 @@
         let history = [];
         let redoStack = [];
 
-        // Canvas setup
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
 
@@ -78,7 +77,6 @@
         window.addEventListener('resize', resizeCanvas);
         resizeCanvas();
 
-        // Tool functions
         function setTool(newTool) {
             tool = newTool;
             canvas.style.cursor = tool === 'move' ? 'grab' : 'crosshair';
@@ -99,7 +97,6 @@
             redoStack = [];
         }
 
-        // Drawing events
         canvas.addEventListener('mousedown', startDrawing);
         canvas.addEventListener('mousemove', draw);
         canvas.addEventListener('mouseup', stopDrawing);
@@ -174,7 +171,6 @@
             }
         }
 
-        // Undo/Redo
         function undo() {
             if (history.length === 0) return;
             const action = history.pop();
@@ -222,8 +218,10 @@
             offsetY = currentOffsetY;
         }
 
-        // WebSocket
-        const socket = new WebSocket('ws://localhost:3001');
+        // Dynamic WebSocket URL based on current host
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsHost = window.location.host;
+        const socket = new WebSocket(`${wsProtocol}//${wsHost}/ws`);
 
         socket.onopen = () => {
             console.log('Connected to WebSocket server');
