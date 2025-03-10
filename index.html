@@ -48,6 +48,8 @@
         <button onclick="undo()">Undo</button>
         <button onclick="redo()">Redo</button>
         <input type="range" id="size" min="1" max="20" value="2" onchange="setSize(this.value)">
+        <button onclick="zoom(1.2)">Zoom In</button>
+        <button onclick="zoom(0.8)">Zoom Out</button>
     </div>
     <canvas id="whiteboard"></canvas>
     <div id="status" class="disconnected">Disconnected</div>
@@ -61,18 +63,19 @@
         let size = 2;
         let drawing = false;
         let lastX, lastY;
-        let offsetX = 0, offsetY = 0;
         let history = [];
         let redoStack = [];
+        let scale = 1; // Zoom level
+        let offsetX = 0, offsetY = 0; // Translation for panning
 
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
 
+        // Set canvas to full window size
         function resizeCanvas() {
-            const temp = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            canvas.width = window.innerWidth * 0.9;
-            canvas.height = window.innerHeight * 0.8;
-            ctx.putImageData(temp, 0, 0);
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight - document.getElementById('toolbar').offsetHeight;
+            redraw(); // Redraw after resize
         }
         window.addEventListener('resize', resizeCanvas);
         resizeCanvas();
@@ -90,22 +93,33 @@
             size = parseInt(newSize);
         }
 
+        function zoom(factor) {
+            scale *= factor;
+            redraw();
+        }
+
         function clearBoard() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            socket.send(JSON.stringify({ type: 'clear' }));
             history.push({ type: 'clear' });
             redoStack = [];
+            socket.send(JSON.stringify({ type: 'clear' }));
+            redraw();
         }
 
         canvas.addEventListener('mousedown', startDrawing);
         canvas.addEventListener('mousemove', draw);
         canvas.addEventListener('mouseup', stopDrawing);
         canvas.addEventListener('mouseout', stopDrawing);
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            zoom(e.deltaY > 0 ? 0.9 : 1.1); // Zoom out/in with wheel
+        });
 
         function startDrawing(e) {
             drawing = true;
             const rect = canvas.getBoundingClientRect();
-            [lastX, lastY] = [e.clientX - rect.left - offsetX, e.clientY - rect.top - offsetY];
+            const virtualX = (e.clientX - rect.left - offsetX) / scale;
+            const virtualY = (e.clientY - rect.top - offsetY) / scale;
+            [lastX, lastY] = [virtualX, virtualY];
             if (tool === 'move') {
                 canvas.style.cursor = 'grabbing';
             }
@@ -114,15 +128,15 @@
         function draw(e) {
             if (!drawing) return;
             const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left - offsetX;
-            const y = e.clientY - rect.top - offsetY;
+            const virtualX = (e.clientX - rect.left - offsetX) / scale;
+            const virtualY = (e.clientY - rect.top - offsetY) / scale;
 
             if (tool === 'pen') {
                 ctx.beginPath();
-                ctx.moveTo(lastX, lastY);
-                ctx.lineTo(x, y);
+                ctx.moveTo(lastX * scale + offsetX, lastY * scale + offsetY);
+                ctx.lineTo(virtualX * scale + offsetX, virtualY * scale + offsetY);
                 ctx.strokeStyle = color;
-                ctx.lineWidth = size;
+                ctx.lineWidth = size * scale; // Scale line width with zoom
                 ctx.stroke();
                 socket.send(JSON.stringify({
                     type: 'draw',
@@ -131,37 +145,37 @@
                     size,
                     lastX,
                     lastY,
-                    x,
-                    y
+                    x: virtualX,
+                    y: virtualY
                 }));
-                history.push({ type: 'draw', tool: 'pen', color, size, lastX, lastY, x, y });
+                history.push({ type: 'draw', tool: 'pen', color, size, lastX, lastY, x: virtualX, y: virtualY });
                 redoStack = [];
             } else if (tool === 'eraser') {
                 ctx.globalCompositeOperation = 'destination-out';
                 ctx.beginPath();
-                ctx.arc(x, y, size, 0, Math.PI * 2);
+                ctx.arc(virtualX * scale + offsetX, virtualY * scale + offsetY, size * scale, 0, Math.PI * 2);
                 ctx.fill();
                 ctx.globalCompositeOperation = 'source-over';
                 socket.send(JSON.stringify({
                     type: 'draw',
                     tool: 'eraser',
                     size,
-                    x,
-                    y
+                    x: virtualX,
+                    y: virtualY
                 }));
-                history.push({ type: 'draw', tool: 'eraser', size, x, y });
+                history.push({ type: 'draw', tool: 'eraser', size, x: virtualX, y: virtualY });
                 redoStack = [];
             } else if (tool === 'move') {
                 offsetX += e.movementX;
                 offsetY += e.movementY;
-                ctx.setTransform(1, 0, 0, 1, offsetX, offsetY);
                 socket.send(JSON.stringify({
                     type: 'move',
                     offsetX,
                     offsetY
                 }));
+                redraw();
             }
-            [lastX, lastY] = [x, y];
+            [lastX, lastY] = [virtualX, virtualY];
         }
 
         function stopDrawing() {
@@ -189,8 +203,8 @@
 
         function redraw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.setTransform(1, 0, 0, 1, 0, 0);
-            let currentOffsetX = 0, currentOffsetY = 0;
+            ctx.setTransform(1, 0, 0, 1, offsetX, offsetY); // Apply pan
+            ctx.scale(scale, scale); // Apply zoom
 
             history.forEach(action => {
                 if (action.type === 'draw' && action.tool === 'pen') {
@@ -206,19 +220,16 @@
                     ctx.arc(action.x, action.y, action.size, 0, Math.PI * 2);
                     ctx.fill();
                     ctx.globalCompositeOperation = 'source-over';
-                } else if (action.type === 'move') {
-                    currentOffsetX = action.offsetX;
-                    currentOffsetY = action.offsetY;
                 } else if (action.type === 'clear') {
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.clearRect(-Infinity, -Infinity, Infinity, Infinity); // Clear infinite space
                 }
             });
-            ctx.setTransform(1, 0, 0, 1, currentOffsetX, currentOffsetY);
-            offsetX = currentOffsetX;
-            offsetY = currentOffsetY;
+
+            // Reset transform to avoid affecting UI elements
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
         }
 
-        // Connect to WebSocket at root (wss://watch.stream150.com)
+        // WebSocket connection
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsHost = window.location.host;
         const socket = new WebSocket(`${wsProtocol}//${wsHost}`);
@@ -237,16 +248,16 @@
             } else if (data.type === 'draw') {
                 if (data.tool === 'pen') {
                     ctx.beginPath();
-                    ctx.moveTo(data.lastX, data.lastY);
-                    ctx.lineTo(data.x, data.y);
+                    ctx.moveTo(data.lastX * scale + offsetX, data.lastY * scale + offsetY);
+                    ctx.lineTo(data.x * scale + offsetX, data.y * scale + offsetY);
                     ctx.strokeStyle = data.color;
-                    ctx.lineWidth = data.size;
+                    ctx.lineWidth = data.size * scale;
                     ctx.stroke();
                     history.push({ type: 'draw', tool: 'pen', color: data.color, size: data.size, lastX: data.lastX, lastY: data.lastY, x: data.x, y: data.y });
                 } else if (data.tool === 'eraser') {
                     ctx.globalCompositeOperation = 'destination-out';
                     ctx.beginPath();
-                    ctx.arc(data.x, data.y, data.size, 0, Math.PI * 2);
+                    ctx.arc(data.x * scale + offsetX, data.y * scale + offsetY, data.size * scale, 0, Math.PI * 2);
                     ctx.fill();
                     ctx.globalCompositeOperation = 'source-over';
                     history.push({ type: 'draw', tool: 'eraser', size: data.size, x: data.x, y: data.y });
@@ -254,11 +265,10 @@
             } else if (data.type === 'move') {
                 offsetX = data.offsetX;
                 offsetY = data.offsetY;
-                ctx.setTransform(1, 0, 0, 1, offsetX, offsetY);
-                history.push({ type: 'move', offsetX, offsetY });
+                redraw();
             } else if (data.type === 'clear') {
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
                 history.push({ type: 'clear' });
+                redraw();
             } else if (data.type === 'undo') {
                 if (history.length > 0) {
                     redoStack.push(history.pop());
