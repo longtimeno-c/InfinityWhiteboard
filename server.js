@@ -2,6 +2,7 @@ const WebSocket = require('ws');
 const http = require('http');
 const express = require('express');
 const fs = require('fs').promises;
+const { v4: uuidv4 } = require('uuid'); // Add UUID for unique identifiers
 
 const app = express();
 const server = http.createServer(app);
@@ -9,14 +10,16 @@ const wss = new WebSocket.Server({ server }); // WebSocket on root path
 
 const BOARD_FILE = 'whiteboard.json';
 let boardState = { actions: [] };
-const drawings = []; // Store all drawings server-side
+const clients = new Map(); // Track connected clients
 
 async function loadBoardState() {
     try {
         const data = await fs.readFile(BOARD_FILE, 'utf8');
         boardState = JSON.parse(data);
+        console.log('Loaded board state with', boardState.actions.length, 'actions');
     } catch (error) {
         console.log('No existing board state found, starting fresh');
+        boardState = { actions: [] };
     }
 }
 
@@ -28,76 +31,115 @@ async function saveBoardState() {
     }
 }
 
+// Debounce save function to prevent excessive writes
+let saveTimeout = null;
+function debouncedSave() {
+    if (saveTimeout) clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(() => {
+        saveBoardState();
+        saveTimeout = null;
+    }, 1000); // Save after 1 second of inactivity
+}
+
+// Broadcast to all clients except sender
+function broadcast(message, excludeClient = null) {
+    wss.clients.forEach((client) => {
+        if (client !== excludeClient && client.readyState === WebSocket.OPEN) {
+            client.send(message);
+        }
+    });
+}
+
 loadBoardState().then(() => {
     wss.on('connection', (ws) => {
-        console.log('New client connected');
-        ws.send(JSON.stringify({ type: 'init', state: boardState }));
-
-        // Send existing drawings to new clients
-        ws.send(JSON.stringify({ type: 'init-canvas', drawings }));
+        const clientId = uuidv4();
+        clients.set(ws, { id: clientId });
+        console.log(`New client connected: ${clientId}`);
+        
+        // Send initial state to new client
+        ws.send(JSON.stringify({ 
+            type: 'init', 
+            state: boardState,
+            clientId: clientId
+        }));
 
         ws.on('message', (message) => {
             try {
                 const data = JSON.parse(message);
+                
+                // Add client ID and timestamp to the action
+                if (!data.clientId) {
+                    data.clientId = clientId;
+                }
+                data.timestamp = Date.now();
 
-                if (data.type === 'undo' && boardState.actions.length > 0) {
-                    boardState.actions.pop();
-                    saveBoardState();
-                } else if (data.type === 'redo') {
-                    // Redo would require a redo stack, omitted for simplicity
-                } else {
+                if (data.type === 'draw' || data.type === 'erase') {
+                    // Add the action to board state
                     boardState.actions.push(data);
-                    saveBoardState();
-                }
-
-                // Store the drawing data
-                if (data.type === 'draw') {
-                    drawings.push({
-                        path: data.path,
-                        color: data.color,
-                        width: data.width,
-                        id: ws.id
-                    });
-                } else if (data.type === 'erase') {
-                    // Store eraser strokes separately
-                    drawings.push({
-                        path: data.path,
-                        type: 'erase',
-                        width: data.width,
-                        id: ws.id
-                    });
-                }
-
-                wss.clients.forEach((client) => {
-                    if (client.readyState === WebSocket.OPEN) {
-                        client.send(JSON.stringify(data));
+                    debouncedSave();
+                    
+                    // Broadcast to all other clients
+                    broadcast(JSON.stringify(data), ws);
+                } else if (data.type === 'undo') {
+                    // Find the last action by this client and remove it
+                    for (let i = boardState.actions.length - 1; i >= 0; i--) {
+                        if (boardState.actions[i].clientId === clientId) {
+                            boardState.actions.splice(i, 1);
+                            break;
+                        }
                     }
-                });
+                    debouncedSave();
+                    
+                    // Broadcast the updated state to all clients
+                    broadcast(JSON.stringify({ 
+                        type: 'update', 
+                        state: boardState 
+                    }));
+                } else if (data.type === 'clear') {
+                    boardState.actions = [];
+                    debouncedSave();
+                    
+                    // Broadcast clear command to all clients
+                    broadcast(JSON.stringify({ type: 'clear' }));
+                } else if (data.type === 'pan' || data.type === 'zoom') {
+                    // Don't save view state changes, just broadcast to others
+                    broadcast(JSON.stringify(data), ws);
+                }
             } catch (error) {
                 console.error('Error processing message:', error);
             }
         });
 
-        ws.on('close', () => console.log('Client disconnected'));
+        ws.on('close', () => {
+            console.log(`Client disconnected: ${clients.get(ws)?.id}`);
+            clients.delete(ws);
+        });
+
+        ws.on('error', (error) => {
+            console.error(`WebSocket error for client ${clients.get(ws)?.id}:`, error);
+        });
     });
 
     wss.on('error', (error) => {
         console.error('WebSocket Server Error:', error);
     });
 
-    // Serve static files (e.g., index.html)
+    // Serve static files
     app.use(express.static('.'));
 
-    // Start the server on port 3000
-    const PORT = 3001;
+    // Start the server
+    const PORT = process.env.PORT || 3001;
     server.listen(PORT, () => {
         console.log(`HTTP and WebSocket server running on http://localhost:${PORT}`);
         console.log(`Expect Caddy to proxy https://watch.stream150.com and wss://watch.stream150.com to this server`);
     });
 
-    // Add a route to save drawings to a file periodically
+    // Periodically save board state as backup
     setInterval(() => {
-        const fs = require('fs');
-        fs.writeFileSync('drawings.json', JSON.stringify(drawings));
-    }, 60000); // Save every minute
+        if (saveTimeout) {
+            clearTimeout(saveTimeout);
+            saveTimeout = null;
+            saveBoardState();
+        }
+    }, 60000); // Force save every minute
 });

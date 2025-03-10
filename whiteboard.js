@@ -56,20 +56,30 @@ function setSize(newSize) {
 }
 
 function zoom(factor) {
+    const oldScale = scale;
     scale *= factor;
-    socket.send(JSON.stringify({ type: 'zoom', scale }));
+    
+    // Send zoom update to server
+    socket.send(JSON.stringify({ 
+        type: 'zoom', 
+        scale 
+    }));
+    
     redraw();
 }
 
 function clearBoardWithConfirm() {
     if (confirm('Are you sure you want to clear the board?')) {
+        // Send clear command to server
+        socket.send(JSON.stringify({ type: 'clear' }));
+        
+        // Local clear (will be overwritten when server responds)
         history = [];
         redoStack = [];
         scale = 1;
         offsetX = 0;
         offsetY = 0;
         drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
-        socket.send(JSON.stringify({ type: 'clear', history: [], scale: 1, offsetX: 0, offsetY: 0 }));
         redraw();
     }
 }
@@ -102,7 +112,13 @@ function startDrawing(e) {
     e.preventDefault();
     drawing = true;
     const { x, y } = getVirtualCoords(e);
-    currentStroke = { type: 'draw', tool, color, size, points: [{ x, y, pressure: e.pressure || 1 }] };
+    currentStroke = { 
+        type: 'draw', 
+        tool, 
+        color, 
+        size, 
+        points: [{ x, y, pressure: e.pressure || 1 }] 
+    };
     ctx.beginPath();
     ctx.moveTo(x * scale + offsetX, y * scale + offsetY);
 }
@@ -133,17 +149,45 @@ function draw(e) {
     } else if (tool === 'pan') {
         panBoard(e);
         throttleRedraw();
+        
+        // Send pan updates to other clients (throttled)
+        throttleSendPanUpdate();
+    }
+}
+
+// Throttle pan updates to reduce network traffic
+let panUpdateTimeout = null;
+function throttleSendPanUpdate() {
+    if (!panUpdateTimeout) {
+        panUpdateTimeout = setTimeout(() => {
+            socket.send(JSON.stringify({ 
+                type: 'pan', 
+                offsetX, 
+                offsetY 
+            }));
+            panUpdateTimeout = null;
+        }, 100); // Send at most every 100ms
     }
 }
 
 function stopDrawing() {
     drawing = false;
     if (tool === 'pen' || tool === 'eraser') {
-        if (currentStroke) {
+        if (currentStroke && currentStroke.points.length > 1) {
+            // Only send strokes with at least 2 points
             history.push(currentStroke);
             redoStack = [];
             drawingCtx.drawImage(canvas, 0, 0); // Update offscreen canvas with current state
-            socket.send(JSON.stringify({ type: 'update', history, scale, offsetX, offsetY }));
+            
+            // Send the stroke to the server
+            socket.send(JSON.stringify({ 
+                type: currentStroke.tool === 'eraser' ? 'erase' : 'draw',
+                tool: currentStroke.tool,
+                color: currentStroke.color,
+                size: currentStroke.size,
+                points: currentStroke.points
+            }));
+            
             redraw(); // Full redraw to sync grid and drawing
             currentStroke = null;
         }
@@ -151,6 +195,14 @@ function stopDrawing() {
         canvas.style.cursor = 'grab';
         if (isPanning) {
             isPanning = false;
+            
+            // Send final pan position
+            socket.send(JSON.stringify({ 
+                type: 'pan', 
+                offsetX, 
+                offsetY 
+            }));
+            
             requestAnimationFrame(applyPanInertia);
         }
     }
@@ -176,5 +228,54 @@ function applyPanInertia() {
         requestAnimationFrame(applyPanInertia);
     }
 }
+
+function undo() {
+    if (history.length === 0) return;
+    
+    // Send undo command to server
+    socket.send(JSON.stringify({ type: 'undo' }));
+    
+    // Local undo (will be overwritten when server responds)
+    const action = history.pop();
+    redoStack.push(action);
+    redraw();
+}
+
+function redo() {
+    if (redoStack.length === 0) return;
+    
+    // Local redo (will be overwritten when server responds)
+    const action = redoStack.pop();
+    history.push(action);
+    
+    // Send redo command to server
+    socket.send(JSON.stringify({ type: 'redo' }));
+    
+    redraw();
+}
+
+// Initialize the whiteboard
+function initWhiteboard() {
+    // Set up canvas and context
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    drawingCtx.lineCap = 'round';
+    drawingCtx.lineJoin = 'round';
+    
+    // Resize canvas to fit window
+    resizeCanvas();
+    
+    // Set default tool
+    setTool('pen');
+    
+    // Force an initial redraw
+    setTimeout(() => {
+        console.log('Initial whiteboard setup complete');
+        redraw();
+    }, 500);
+}
+
+// Call init function when page loads
+window.addEventListener('DOMContentLoaded', initWhiteboard);
 
 const socket = setupWebSocket();

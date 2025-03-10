@@ -9,7 +9,8 @@ dist/
 web-build/
 
 .env
-
+drawings.*
+whiteboard.json
 # Native
 *.orig.*
 *.jks
