@@ -35,9 +35,27 @@
         <button class="tool-button" data-tooltip="Zoom Out" onclick="zoom(0.8)">
             <i class="fas fa-search-minus"></i>
         </button>
+        
+        <!-- Username display in top right -->
+        <div id="username-container">
+            <span id="username-display"></span>
+            <button id="change-username-btn" class="tool-button" data-tooltip="Change Username">
+                <i class="fas fa-user-edit"></i>
+            </button>
+        </div>
     </div>
     <canvas id="whiteboard"></canvas>
     <div id="status" class="disconnected">Disconnected</div>
+
+    <!-- Username Modal -->
+    <div id="username-modal" class="modal">
+        <div class="modal-content">
+            <h2>Welcome to Infinite Whiteboard</h2>
+            <p>Please enter a username to continue:</p>
+            <input type="text" id="username-input" placeholder="Username">
+            <button id="save-username-btn">Save</button>
+        </div>
+    </div>
 
     <div class="tools">
         <button id="pen-button" class="active">Pen</button>
@@ -64,7 +82,6 @@
     <script src="utils.js"></script>
     <script src="whiteboard.js"></script>
     <script>
-      // ... existing code ...
       
       // Modify your drawing initialization
       const socket = io();

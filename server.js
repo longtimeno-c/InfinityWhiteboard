@@ -53,7 +53,7 @@ function broadcast(message, excludeClient = null) {
 loadBoardState().then(() => {
     wss.on('connection', (ws) => {
         const clientId = uuidv4();
-        clients.set(ws, { id: clientId });
+        clients.set(ws, { id: clientId, username: null });
         console.log(`New client connected: ${clientId}`);
         
         // Send initial state to new client
@@ -73,7 +73,29 @@ loadBoardState().then(() => {
                 }
                 data.timestamp = Date.now();
 
-                if (data.type === 'draw' || data.type === 'erase') {
+                if (data.type === 'username') {
+                    // Store username for this client
+                    const clientInfo = clients.get(ws);
+                    if (clientInfo) {
+                        clientInfo.username = data.username;
+                        clients.set(ws, clientInfo);
+                        console.log(`Client ${clientId} set username: ${data.username}`);
+                    }
+                    
+                    // Broadcast username change to all clients
+                    broadcast(JSON.stringify({
+                        type: 'user_update',
+                        clientId: clientId,
+                        username: data.username
+                    }));
+                    
+                } else if (data.type === 'draw' || data.type === 'erase') {
+                    // Add username to the action if available
+                    const clientInfo = clients.get(ws);
+                    if (clientInfo && clientInfo.username) {
+                        data.username = clientInfo.username;
+                    }
+                    
                     // Add the action to board state
                     boardState.actions.push(data);
                     debouncedSave();
@@ -111,7 +133,18 @@ loadBoardState().then(() => {
         });
 
         ws.on('close', () => {
-            console.log(`Client disconnected: ${clients.get(ws)?.id}`);
+            const clientInfo = clients.get(ws);
+            console.log(`Client disconnected: ${clientInfo?.id} (${clientInfo?.username || 'unnamed'})`);
+            
+            // Notify other clients about disconnection
+            if (clientInfo && clientInfo.username) {
+                broadcast(JSON.stringify({
+                    type: 'user_disconnect',
+                    clientId: clientInfo.id,
+                    username: clientInfo.username
+                }));
+            }
+            
             clients.delete(ws);
         });
 

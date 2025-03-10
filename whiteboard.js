@@ -4,6 +4,14 @@ const drawingCanvas = document.createElement('canvas'); // Offscreen drawing lay
 const drawingCtx = drawingCanvas.getContext('2d');
 const status = document.getElementById('status');
 
+// Username elements
+const usernameModal = document.getElementById('username-modal');
+const usernameInput = document.getElementById('username-input');
+const saveUsernameBtn = document.getElementById('save-username-btn');
+const usernameDisplay = document.getElementById('username-display');
+const changeUsernameBtn = document.getElementById('change-username-btn');
+
+let username = ''; // Current username
 let tool = 'pen';
 let color = '#000000';
 let size = 2;
@@ -19,6 +27,7 @@ let isPanning = false;
 const GRID_SIZE = 20;
 const FRICTION = 0.92;
 let rafId = null;
+let socket; // WebSocket connection
 
 ctx.lineCap = 'round';
 ctx.lineJoin = 'round';
@@ -28,6 +37,86 @@ drawingCtx.lineJoin = 'round';
 const penTool = document.getElementById('penTool');
 const eraserTool = document.getElementById('eraserTool');
 const panTool = document.getElementById('panTool');
+
+// Username functions
+function generateRandomUsername() {
+    const adjectives = ['Creative', 'Artistic', 'Clever', 'Bright', 'Colorful', 'Dazzling', 'Elegant', 'Fancy', 'Glowing', 'Happy'];
+    const nouns = ['Artist', 'Painter', 'Creator', 'Designer', 'Sketcher', 'Drawer', 'Illustrator', 'Doodler', 'Visionary', 'Genius'];
+    const randomNumber = Math.floor(Math.random() * 1000);
+    
+    const randomAdjective = adjectives[Math.floor(Math.random() * adjectives.length)];
+    const randomNoun = nouns[Math.floor(Math.random() * nouns.length)];
+    
+    return `${randomAdjective}${randomNoun}${randomNumber}`;
+}
+
+function setCookie(name, value, days) {
+    const expires = new Date();
+    expires.setTime(expires.getTime() + days * 24 * 60 * 60 * 1000);
+    document.cookie = `${name}=${value};expires=${expires.toUTCString()};path=/`;
+}
+
+function getCookie(name) {
+    const nameEQ = `${name}=`;
+    const ca = document.cookie.split(';');
+    for (let i = 0; i < ca.length; i++) {
+        let c = ca[i];
+        while (c.charAt(0) === ' ') c = c.substring(1, c.length);
+        if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length);
+    }
+    return null;
+}
+
+function showUsernameModal() {
+    // Generate a random username as a suggestion
+    usernameInput.value = generateRandomUsername();
+    usernameModal.classList.add('show');
+    usernameInput.focus();
+    usernameInput.select(); // Select the text for easy editing
+}
+
+function hideUsernameModal() {
+    usernameModal.classList.remove('show');
+}
+
+function saveUsername() {
+    const newUsername = usernameInput.value.trim();
+    if (newUsername) {
+        username = newUsername;
+        usernameDisplay.textContent = username;
+        setCookie('whiteboard_username', username, 30); // Store for 30 days
+        hideUsernameModal();
+        
+        // Send username to server
+        socket.send(JSON.stringify({ 
+            type: 'username', 
+            username: username 
+        }));
+    }
+}
+
+function initUsername() {
+    // Check if username cookie exists
+    const savedUsername = getCookie('whiteboard_username');
+    if (savedUsername) {
+        username = savedUsername;
+        usernameDisplay.textContent = username;
+    } else {
+        // Show modal for first-time visitors
+        showUsernameModal();
+    }
+    
+    // Set up event listeners
+    saveUsernameBtn.addEventListener('click', saveUsername);
+    changeUsernameBtn.addEventListener('click', showUsernameModal);
+    
+    // Allow pressing Enter to save username
+    usernameInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            saveUsername();
+        }
+    });
+}
 
 function resizeCanvas() {
     canvas.width = window.innerWidth;
@@ -210,7 +299,8 @@ function stopDrawing() {
                 tool: currentStroke.tool,
                 color: currentStroke.color,
                 size: currentStroke.size,
-                points: currentStroke.points
+                points: currentStroke.points,
+                username: username // Include username with the stroke
             }));
             
             redraw(); // Full redraw to sync grid and drawing
@@ -301,6 +391,110 @@ function initWhiteboard() {
 }
 
 // Call init function when page loads
-window.addEventListener('DOMContentLoaded', initWhiteboard);
+document.addEventListener('DOMContentLoaded', () => {
+    // Initialize username first
+    initUsername();
+    
+    // Then initialize whiteboard and WebSocket
+    initWhiteboard();
+    
+    // Setup WebSocket after username is initialized
+    socket = setupWebSocket();
+});
 
-const socket = setupWebSocket();
+function setupWebSocket() {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}`;
+    const socket = new WebSocket(wsUrl);
+    
+    socket.onopen = () => {
+        console.log('WebSocket connection established');
+        status.textContent = 'Connected';
+        status.className = 'connected';
+        
+        // Send username if available
+        if (username) {
+            socket.send(JSON.stringify({ 
+                type: 'username', 
+                username: username 
+            }));
+        }
+    };
+    
+    socket.onclose = () => {
+        console.log('WebSocket connection closed');
+        status.textContent = 'Disconnected';
+        status.className = 'disconnected';
+        
+        // Try to reconnect after a delay
+        setTimeout(() => {
+            console.log('Attempting to reconnect...');
+            setupWebSocket();
+        }, 3000);
+    };
+    
+    socket.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        status.textContent = 'Connection Error';
+        status.className = 'disconnected';
+    };
+    
+    socket.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === 'init') {
+                console.log('Received initial state');
+                history = data.state.actions || [];
+                redraw();
+            } else if (data.type === 'draw') {
+                // Handle drawing from other clients
+                const stroke = {
+                    type: 'draw',
+                    tool: data.tool || 'pen',
+                    color: data.color,
+                    size: data.size,
+                    points: data.points
+                };
+                history.push(stroke);
+                redraw();
+            } else if (data.type === 'erase') {
+                // Handle erasing from other clients
+                const stroke = {
+                    type: 'erase',
+                    tool: 'eraser',
+                    size: data.size,
+                    points: data.points
+                };
+                history.push(stroke);
+                redraw();
+            } else if (data.type === 'clear') {
+                // Handle board clear
+                history = [];
+                redoStack = [];
+                redraw();
+            } else if (data.type === 'pan') {
+                // Handle pan updates from other clients
+                offsetX = data.offsetX;
+                offsetY = data.offsetY;
+                redraw();
+            } else if (data.type === 'zoom') {
+                // Handle zoom updates from other clients
+                scale = data.scale;
+                redraw();
+            } else if (data.type === 'user_update') {
+                // Handle username updates from other clients
+                console.log(`User ${data.clientId} is now known as ${data.username}`);
+                // You could display this information in a users list if you add that feature
+            } else if (data.type === 'user_disconnect') {
+                // Handle user disconnection
+                console.log(`User ${data.username} (${data.clientId}) disconnected`);
+                // You could update a users list if you add that feature
+            }
+        } catch (error) {
+            console.error('Error processing message:', error);
+        }
+    };
+    
+    return socket;
+}
