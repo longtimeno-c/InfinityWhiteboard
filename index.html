@@ -21,6 +21,7 @@
         #whiteboard {
             border: 1px solid #000;
             cursor: crosshair;
+            touch-action: none; /* Prevent default touch scrolling */
         }
         #status {
             position: fixed;
@@ -43,7 +44,6 @@
             <option value="green">Green</option>
         </select>
         <button onclick="setTool('eraser')">Eraser</button>
-        <button onclick="setTool('move')">Move</button>
         <button onclick="clearBoard()">Clear</button>
         <button onclick="undo()">Undo</button>
         <button onclick="redo()">Redo</button>
@@ -67,6 +67,7 @@
         let redoStack = [];
         let scale = 1; // Zoom level
         let offsetX = 0, offsetY = 0; // Translation for panning
+        const GRID_SIZE = 20; // Size of grid squares in virtual coordinates
 
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
@@ -75,14 +76,14 @@
         function resizeCanvas() {
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight - document.getElementById('toolbar').offsetHeight;
-            redraw(); // Redraw after resize
+            redraw();
         }
         window.addEventListener('resize', resizeCanvas);
         resizeCanvas();
 
         function setTool(newTool) {
             tool = newTool;
-            canvas.style.cursor = tool === 'move' ? 'grab' : 'crosshair';
+            canvas.style.cursor = tool === 'pen' ? 'crosshair' : 'default';
         }
 
         function setColor(newColor) {
@@ -105,67 +106,69 @@
             redraw();
         }
 
-        canvas.addEventListener('mousedown', startDrawing);
-        canvas.addEventListener('mousemove', draw);
-        canvas.addEventListener('mouseup', stopDrawing);
-        canvas.addEventListener('mouseout', stopDrawing);
+        // Draw squared background
+        function drawGrid() {
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, offsetX, offsetY);
+            ctx.scale(scale, scale);
+
+            ctx.strokeStyle = '#e0e0e0'; // Light gray grid lines
+            ctx.lineWidth = 0.5 / scale; // Thin lines, adjusted for zoom
+
+            // Calculate visible bounds in virtual coordinates
+            const minX = -offsetX / scale;
+            const minY = -offsetY / scale;
+            const maxX = (canvas.width - offsetX) / scale;
+            const maxY = (canvas.height - offsetY) / scale;
+
+            // Draw vertical lines
+            for (let x = Math.floor(minX / GRID_SIZE) * GRID_SIZE; x <= maxX; x += GRID_SIZE) {
+                ctx.beginPath();
+                ctx.moveTo(x, minY);
+                ctx.lineTo(x, maxY);
+                ctx.stroke();
+            }
+
+            // Draw horizontal lines
+            for (let y = Math.floor(minY / GRID_SIZE) * GRID_SIZE; y <= maxY; y += GRID_SIZE) {
+                ctx.beginPath();
+                ctx.moveTo(minX, y);
+                ctx.lineTo(maxX, y);
+                ctx.stroke();
+            }
+
+            ctx.restore();
+        }
+
+        // Pointer events for stylus/touch/mouse support
+        canvas.addEventListener('pointerdown', startDrawing);
+        canvas.addEventListener('pointermove', draw);
+        canvas.addEventListener('pointerup', stopDrawing);
+        canvas.addEventListener('pointerleave', stopDrawing);
         canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
-            zoom(e.deltaY > 0 ? 0.9 : 1.1); // Zoom out/in with wheel
+            zoom(e.deltaY > 0 ? 0.9 : 1.1); // Zoom with wheel
         });
 
         function startDrawing(e) {
+            e.preventDefault();
             drawing = true;
             const rect = canvas.getBoundingClientRect();
             const virtualX = (e.clientX - rect.left - offsetX) / scale;
             const virtualY = (e.clientY - rect.top - offsetY) / scale;
             [lastX, lastY] = [virtualX, virtualY];
-            if (tool === 'move') {
-                canvas.style.cursor = 'grabbing';
-            }
         }
 
         function draw(e) {
+            e.preventDefault();
             if (!drawing) return;
+
             const rect = canvas.getBoundingClientRect();
             const virtualX = (e.clientX - rect.left - offsetX) / scale;
             const virtualY = (e.clientY - rect.top - offsetY) / scale;
+            const pressure = e.pressure || 1; // Stylus pressure (0-1), default to 1 if unavailable
 
-            if (tool === 'pen') {
-                ctx.beginPath();
-                ctx.moveTo(lastX * scale + offsetX, lastY * scale + offsetY);
-                ctx.lineTo(virtualX * scale + offsetX, virtualY * scale + offsetY);
-                ctx.strokeStyle = color;
-                ctx.lineWidth = size * scale; // Scale line width with zoom
-                ctx.stroke();
-                socket.send(JSON.stringify({
-                    type: 'draw',
-                    tool: 'pen',
-                    color,
-                    size,
-                    lastX,
-                    lastY,
-                    x: virtualX,
-                    y: virtualY
-                }));
-                history.push({ type: 'draw', tool: 'pen', color, size, lastX, lastY, x: virtualX, y: virtualY });
-                redoStack = [];
-            } else if (tool === 'eraser') {
-                ctx.globalCompositeOperation = 'destination-out';
-                ctx.beginPath();
-                ctx.arc(virtualX * scale + offsetX, virtualY * scale + offsetY, size * scale, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.globalCompositeOperation = 'source-over';
-                socket.send(JSON.stringify({
-                    type: 'draw',
-                    tool: 'eraser',
-                    size,
-                    x: virtualX,
-                    y: virtualY
-                }));
-                history.push({ type: 'draw', tool: 'eraser', size, x: virtualX, y: virtualY });
-                redoStack = [];
-            } else if (tool === 'move') {
+            if (e.buttons === 4 || (tool === 'pen' && e.buttons === 2)) { // Middle mouse or right-click with pen tool for panning
                 offsetX += e.movementX;
                 offsetY += e.movementY;
                 socket.send(JSON.stringify({
@@ -174,15 +177,46 @@
                     offsetY
                 }));
                 redraw();
+            } else if (tool === 'pen' && e.buttons === 1) { // Left click or stylus
+                ctx.beginPath();
+                ctx.moveTo(lastX * scale + offsetX, lastY * scale + offsetY);
+                ctx.lineTo(virtualX * scale + offsetX, virtualY * scale + offsetY);
+                ctx.strokeStyle = color;
+                ctx.lineWidth = size * scale * pressure; // Adjust line width with pressure
+                ctx.stroke();
+                socket.send(JSON.stringify({
+                    type: 'draw',
+                    tool: 'pen',
+                    color,
+                    size: size * pressure, // Send pressure-adjusted size
+                    lastX,
+                    lastY,
+                    x: virtualX,
+                    y: virtualY
+                }));
+                history.push({ type: 'draw', tool: 'pen', color, size: size * pressure, lastX, lastY, x: virtualX, y: virtualY });
+                redoStack = [];
+            } else if (tool === 'eraser' && e.buttons === 1) {
+                ctx.globalCompositeOperation = 'destination-out';
+                ctx.beginPath();
+                ctx.arc(virtualX * scale + offsetX, virtualY * scale + offsetY, size * scale * pressure, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalCompositeOperation = 'source-over';
+                socket.send(JSON.stringify({
+                    type: 'draw',
+                    tool: 'eraser',
+                    size: size * pressure,
+                    x: virtualX,
+                    y: virtualY
+                }));
+                history.push({ type: 'draw', tool: 'eraser', size: size * pressure, x: virtualX, y: virtualY });
+                redoStack = [];
             }
             [lastX, lastY] = [virtualX, virtualY];
         }
 
-        function stopDrawing() {
+        function stopDrawing(e) {
             drawing = false;
-            if (tool === 'move') {
-                canvas.style.cursor = 'grab';
-            }
         }
 
         function undo() {
@@ -203,6 +237,8 @@
 
         function redraw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawGrid(); // Draw squared background
+            ctx.save();
             ctx.setTransform(1, 0, 0, 1, offsetX, offsetY); // Apply pan
             ctx.scale(scale, scale); // Apply zoom
 
@@ -221,12 +257,11 @@
                     ctx.fill();
                     ctx.globalCompositeOperation = 'source-over';
                 } else if (action.type === 'clear') {
-                    ctx.clearRect(-Infinity, -Infinity, Infinity, Infinity); // Clear infinite space
+                    ctx.clearRect(-Infinity, -Infinity, Infinity, Infinity);
                 }
             });
 
-            // Reset transform to avoid affecting UI elements
-            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.restore(); // Reset transform
         }
 
         // WebSocket connection
@@ -275,7 +310,7 @@
                     redraw();
                 }
             } else if (data.type === 'redo') {
-                // Redo would need server-side support
+                // Redo needs server-side support
             }
         };
 
