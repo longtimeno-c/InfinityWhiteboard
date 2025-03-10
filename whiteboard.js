@@ -17,6 +17,10 @@ const clearOwnBtn = document.getElementById('clear-own-btn');
 const clearAllBtn = document.getElementById('clear-all-btn');
 const cancelClearBtn = document.getElementById('cancel-clear-btn');
 
+// Board management variables
+let currentBoardId = 'default';
+let boards = [];
+
 let username = ''; // Current username
 let tool = 'pen';
 let color = '#000000';
@@ -124,6 +128,126 @@ function initUsername() {
     });
 }
 
+// Board management functions
+function switchBoard(boardId) {
+    if (boardId === currentBoardId) return;
+    
+    // Send switch board command to server
+    socket.send(JSON.stringify({
+        type: 'switch_board',
+        boardId: boardId
+    }));
+    
+    // Update UI to show loading state
+    updateBoardSelector();
+}
+
+function createBoard() {
+    const boardName = prompt('Enter a name for the new board:', `Board ${boards.length + 1}`);
+    if (boardName) {
+        // Send create board command to server
+        socket.send(JSON.stringify({
+            type: 'create_board',
+            name: boardName
+        }));
+    }
+}
+
+function renameBoard(boardId) {
+    const board = boards.find(b => b.id === boardId);
+    if (!board) return;
+    
+    const newName = prompt('Enter a new name for the board:', board.name);
+    if (newName && newName !== board.name) {
+        // Send rename board command to server
+        socket.send(JSON.stringify({
+            type: 'rename_board',
+            boardId: boardId,
+            name: newName
+        }));
+    }
+}
+
+function deleteBoard(boardId) {
+    if (boardId === 'default') {
+        alert('Cannot delete the default board');
+        return;
+    }
+    
+    const board = boards.find(b => b.id === boardId);
+    if (!board) return;
+    
+    if (confirm(`Are you sure you want to delete the board "${board.name}"?`)) {
+        // Send delete board command to server
+        socket.send(JSON.stringify({
+            type: 'delete_board',
+            boardId: boardId
+        }));
+    }
+}
+
+function updateBoardSelector() {
+    const boardSelector = document.getElementById('board-selector');
+    if (!boardSelector) return;
+    
+    // Clear existing options
+    boardSelector.innerHTML = '';
+    
+    // Add boards to selector
+    boards.forEach(board => {
+        const option = document.createElement('div');
+        option.className = 'board-option';
+        if (board.id === currentBoardId) {
+            option.classList.add('active');
+        }
+        
+        // Create board name element
+        const nameEl = document.createElement('span');
+        nameEl.className = 'board-name';
+        nameEl.textContent = board.name;
+        nameEl.addEventListener('click', () => switchBoard(board.id));
+        option.appendChild(nameEl);
+        
+        // Create board actions container
+        const actionsEl = document.createElement('div');
+        actionsEl.className = 'board-actions';
+        
+        // Add rename button
+        const renameBtn = document.createElement('button');
+        renameBtn.className = 'board-action-btn';
+        renameBtn.innerHTML = '<i class="fas fa-edit"></i>';
+        renameBtn.title = 'Rename board';
+        renameBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            renameBoard(board.id);
+        });
+        actionsEl.appendChild(renameBtn);
+        
+        // Add delete button (except for default board)
+        if (board.id !== 'default') {
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'board-action-btn';
+            deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
+            deleteBtn.title = 'Delete board';
+            deleteBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                deleteBoard(board.id);
+            });
+            actionsEl.appendChild(deleteBtn);
+        }
+        
+        option.appendChild(actionsEl);
+        boardSelector.appendChild(option);
+    });
+    
+    // Add "Create new board" button
+    const createBoardBtn = document.createElement('div');
+    createBoardBtn.className = 'create-board-btn';
+    createBoardBtn.innerHTML = '<i class="fas fa-plus"></i> New Board';
+    createBoardBtn.addEventListener('click', createBoard);
+    boardSelector.appendChild(createBoardBtn);
+}
+
 function resizeCanvas() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight - document.getElementById('toolbar').offsetHeight;
@@ -191,7 +315,7 @@ function clearBoardWithConfirm() {
         showClearOptionsModal();
     } else {
         // For all other users, just ask if they want to clear their own content
-        if (confirm('Are you sure you want to clear your own content from the board?')) {
+        if (confirm('Are you sure you want to clear your own content from the current board?')) {
             clearUserContent();
         }
     }
@@ -215,17 +339,17 @@ function clearUserContent() {
 }
 
 function clearAllContent() {
-        // Send clear command to server
-        socket.send(JSON.stringify({ type: 'clear' }));
-        
-        // Local clear (will be overwritten when server responds)
-        history = [];
-        redoStack = [];
-        scale = 1;
-        offsetX = 0;
-        offsetY = 0;
-        drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
-        redraw();
+    // Send clear command to server
+    socket.send(JSON.stringify({ type: 'clear' }));
+    
+    // Local clear (will be overwritten when server responds)
+    history = [];
+    redoStack = [];
+    scale = 1;
+    offsetX = 0;
+    offsetY = 0;
+    drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+    redraw();
 }
 
 canvas.addEventListener('pointerdown', startDrawing);
@@ -504,7 +628,33 @@ function setupWebSocket() {
             if (data.type === 'init') {
                 console.log('Received initial state');
                 history = data.state.actions || [];
+                currentBoardId = data.boardId || 'default';
+                
+                // Store the list of boards
+                if (data.boards) {
+                    boards = data.boards;
+                    updateBoardSelector();
+                }
+                
                 redraw();
+            } else if (data.type === 'boards_list') {
+                // Update the list of boards
+                if (data.boards) {
+                    boards = data.boards;
+                    updateBoardSelector();
+                }
+            } else if (data.type === 'board_state') {
+                // Handle board state update (when switching boards)
+                if (data.boardId) {
+                    currentBoardId = data.boardId;
+                    history = data.state.actions || [];
+                    redoStack = [];
+                    scale = 1;
+                    offsetX = 0;
+                    offsetY = 0;
+                    redraw();
+                    updateBoardSelector();
+                }
             } else if (data.type === 'draw') {
                 // Handle drawing from other clients
                 const stroke = {
@@ -555,6 +705,9 @@ function setupWebSocket() {
                 // Handle user disconnection
                 console.log(`User ${data.username} (${data.clientId}) disconnected`);
                 // You could update a users list if you add that feature
+            } else if (data.type === 'error') {
+                // Handle error messages from the server
+                alert(data.message || 'An error occurred');
             }
         } catch (error) {
             console.error('Error processing message:', error);
