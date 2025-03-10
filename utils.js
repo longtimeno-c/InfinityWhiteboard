@@ -18,59 +18,71 @@ function panBoard(e) {
 }
 
 function drawGrid() {
-    gridCtx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
-    gridCtx.strokeStyle = '#e0e0e0';
-    gridCtx.lineWidth = 0.5;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, offsetX, offsetY); // Align grid with foreground
+    ctx.scale(scale, scale);
+    ctx.strokeStyle = '#e0e0e0';
+    ctx.lineWidth = 0.5 / scale;
 
-    for (let x = 0; x <= gridCanvas.width; x += GRID_SIZE) {
-        gridCtx.beginPath();
-        gridCtx.moveTo(x, 0);
-        gridCtx.lineTo(x, gridCanvas.height);
-        gridCtx.stroke();
+    const minX = -offsetX / scale;
+    const minY = -offsetY / scale;
+    const maxX = (canvas.width - offsetX) / scale;
+    const maxY = (canvas.height - offsetY) / scale;
+
+    for (let x = Math.floor(minX / GRID_SIZE) * GRID_SIZE; x <= maxX; x += GRID_SIZE) {
+        ctx.beginPath();
+        ctx.moveTo(x, minY);
+        ctx.lineTo(x, maxY);
+        ctx.stroke();
     }
-    for (let y = 0; y <= gridCanvas.height; y += GRID_SIZE) {
-        gridCtx.beginPath();
-        gridCtx.moveTo(0, y);
-        gridCtx.lineTo(gridCanvas.width, y);
-        gridCtx.stroke();
+    for (let y = Math.floor(minY / GRID_SIZE) * GRID_SIZE; y <= maxY; y += GRID_SIZE) {
+        ctx.beginPath();
+        ctx.moveTo(minX, y);
+        ctx.lineTo(maxX, y);
+        ctx.stroke();
     }
+    ctx.restore();
 }
 
 function redraw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(gridCanvas, 0, 0); // Composite static grid
-    ctx.save();
-    ctx.translate(offsetX, offsetY);
-    ctx.scale(scale, scale);
+    drawGrid(); // Draw grid aligned with offsetX/offsetY
+    ctx.drawImage(drawingCanvas, 0, 0); // Composite drawing layer on top
+
+    // Update drawingCanvas with history
+    drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+    drawingCtx.save();
+    drawingCtx.translate(offsetX, offsetY);
+    drawingCtx.scale(scale, scale);
 
     history.forEach(action => {
         if (action.type === 'draw' && action.tool === 'pen') {
-            ctx.beginPath();
-            ctx.strokeStyle = action.color;
+            drawingCtx.beginPath();
+            drawingCtx.strokeStyle = action.color;
             const points = action.points;
             for (let i = 0; i < points.length; i++) {
-                ctx.lineWidth = action.size * points[i].pressure;
+                drawingCtx.lineWidth = action.size * points[i].pressure;
                 if (i === 0) {
-                    ctx.moveTo(points[i].x, points[i].y);
+                    drawingCtx.moveTo(points[i].x, points[i].y);
                 } else {
                     const lastPoint = points[i - 1];
                     const midX = (lastPoint.x + points[i].x) / 2;
                     const midY = (lastPoint.y + points[i].y) / 2;
-                    ctx.quadraticCurveTo(lastPoint.x, lastPoint.y, midX, midY);
+                    drawingCtx.quadraticCurveTo(lastPoint.x, lastPoint.y, midX, midY);
                 }
             }
-            ctx.stroke();
+            drawingCtx.stroke();
         } else if (action.type === 'draw' && action.tool === 'eraser') {
-            ctx.globalCompositeOperation = 'destination-out';
+            drawingCtx.globalCompositeOperation = 'destination-out';
             action.points.forEach(p => {
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, action.size * p.pressure, 0, Math.PI * 2);
-                ctx.fill();
+                drawingCtx.beginPath();
+                drawingCtx.arc(p.x, p.y, action.size * p.pressure, 0, Math.PI * 2);
+                drawingCtx.fill();
             });
-            ctx.globalCompositeOperation = 'source-over';
+            drawingCtx.globalCompositeOperation = 'source-over';
         }
     });
-    ctx.restore();
+    drawingCtx.restore();
 }
 
 function undo() {
@@ -121,7 +133,7 @@ function setupWebSocket() {
             scale = data.scale || 1;
             offsetX = data.offsetX || 0;
             offsetY = data.offsetY || 0;
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
             redraw();
         }
     };

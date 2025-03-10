@@ -1,7 +1,7 @@
 const canvas = document.getElementById('whiteboard');
 const ctx = canvas.getContext('2d');
-const gridCanvas = document.createElement('canvas'); // Offscreen grid
-const gridCtx = gridCanvas.getContext('2d');
+const drawingCanvas = document.createElement('canvas'); // Offscreen drawing layer
+const drawingCtx = drawingCanvas.getContext('2d');
 const status = document.getElementById('status');
 
 let tool = 'pen';
@@ -22,8 +22,8 @@ let rafId = null;
 
 ctx.lineCap = 'round';
 ctx.lineJoin = 'round';
-gridCtx.lineCap = 'round';
-gridCtx.lineJoin = 'round';
+drawingCtx.lineCap = 'round';
+drawingCtx.lineJoin = 'round';
 
 const penTool = document.getElementById('penTool');
 const eraserTool = document.getElementById('eraserTool');
@@ -32,9 +32,8 @@ const panTool = document.getElementById('panTool');
 function resizeCanvas() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight - document.getElementById('toolbar').offsetHeight;
-    gridCanvas.width = canvas.width;
-    gridCanvas.height = canvas.height;
-    drawGrid();
+    drawingCanvas.width = canvas.width;
+    drawingCanvas.height = canvas.height;
     redraw();
 }
 window.addEventListener('resize', resizeCanvas);
@@ -69,7 +68,7 @@ function clearBoardWithConfirm() {
         scale = 1;
         offsetX = 0;
         offsetY = 0;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
         socket.send(JSON.stringify({ type: 'clear', history: [], scale: 1, offsetX: 0, offsetY: 0 }));
         redraw();
     }
@@ -94,6 +93,8 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowRight') offsetX -= 20;
     if (e.key === 'ArrowUp') offsetY += 20;
     if (e.key === 'ArrowDown') offsetY -= 20;
+    if (e.key === '+' || e.key === '=') zoom(1.2); // Zoom in
+    if (e.key === '-') zoom(0.8); // Zoom out
     redraw();
 });
 
@@ -102,8 +103,8 @@ function startDrawing(e) {
     drawing = true;
     const { x, y } = getVirtualCoords(e);
     currentStroke = { type: 'draw', tool, color, size, points: [{ x, y, pressure: e.pressure || 1 }] };
-    ctx.beginPath();
-    ctx.moveTo(x * scale + offsetX, y * scale + offsetY);
+    drawingCtx.beginPath();
+    drawingCtx.moveTo(x * scale + offsetX, y * scale + offsetY);
 }
 
 function draw(e) {
@@ -114,21 +115,23 @@ function draw(e) {
     const pressure = e.pressure || 1;
 
     if (tool === 'pen') {
-        ctx.strokeStyle = color;
-        ctx.lineWidth = size * scale * pressure;
+        drawingCtx.strokeStyle = color;
+        drawingCtx.lineWidth = size * scale * pressure;
         const lastPoint = currentStroke.points[currentStroke.points.length - 1];
         const midX = (lastPoint.x + x) / 2;
         const midY = (lastPoint.y + y) / 2;
-        ctx.quadraticCurveTo(lastPoint.x * scale + offsetX, lastPoint.y * scale + offsetY, midX * scale + offsetX, midY * scale + offsetY);
-        ctx.stroke();
+        drawingCtx.quadraticCurveTo(lastPoint.x * scale + offsetX, lastPoint.y * scale + offsetY, midX * scale + offsetX, midY * scale + offsetY);
+        drawingCtx.stroke();
         currentStroke.points.push({ x, y, pressure });
+        redraw(); // Redraw to show real-time feedback
     } else if (tool === 'eraser') {
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.beginPath();
-        ctx.arc(x * scale + offsetX, y * scale + offsetY, size * scale * pressure, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalCompositeOperation = 'source-over';
+        drawingCtx.globalCompositeOperation = 'destination-out';
+        drawingCtx.beginPath();
+        drawingCtx.arc(x * scale + offsetX, y * scale + offsetY, size * scale * pressure, 0, Math.PI * 2);
+        drawingCtx.fill();
+        drawingCtx.globalCompositeOperation = 'source-over';
         currentStroke.points.push({ x, y, pressure });
+        redraw(); // Redraw to update the drawing layer
     } else if (tool === 'pan') {
         panBoard(e);
         throttleRedraw();
