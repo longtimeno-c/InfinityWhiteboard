@@ -1,0 +1,85 @@
+body {
+    margin: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    font-family: Arial, sans-serif;
+}
+
+#toolbar {
+    padding: 10px;
+    background: #f0f0f0;
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+#whiteboard {
+    border: 1px solid #000;
+    cursor: crosshair;
+    touch-action: none;
+}
+
+#status {
+    position: fixed;
+    bottom: 10px;
+    right: 10px;
+    padding: 5px 10px;
+    border-radius: 3px;
+    font-size: 12px;
+}
+
+.connected { background: #90ee90; }
+.disconnected { background: #ff9999; }
+
+.tool-button {
+    padding: 8px;
+    border: 2px solid #ccc;
+    border-radius: 5px;
+    background: #fff;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+}
+
+.tool-button:hover {
+    background: #e0e0e0;
+}
+
+.tool-button.active {
+    background: #4CAF50;
+    color: white;
+    border-color: #4CAF50;
+}
+
+.tool-button[data-tooltip]:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #333;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 3px;
+    font-size: 12px;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+input[type="range"] {
+    margin: 0 5px;
+    vertical-align: middle;
+}
+
+input[type="color"] {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: none;
+    vertical-align: middle;
+    cursor: pointer;
+}
