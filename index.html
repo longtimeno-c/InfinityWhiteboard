@@ -36,7 +36,8 @@
             <i class="fas fa-search-minus"></i>
         </button>
     </div>
-    <canvas id="whiteboard"></canvas>
+    <canvas id="backgroundCanvas" style="position: absolute; z-index: 1;"></canvas>
+    <canvas id="drawingCanvas" style="position: absolute; z-index: 2;"></canvas>
     <div id="status" class="disconnected">Disconnected</div>
 
     <script src="utils.js"></script>

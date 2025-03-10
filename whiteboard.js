@@ -1,14 +1,14 @@
-const canvas = document.getElementById('whiteboard');
-const ctx = canvas.getContext('2d');
-const drawingCanvas = document.createElement('canvas');
-const drawingCtx = drawingCanvas.getContext('2d');
+const backgroundCanvas = document.getElementById('backgroundCanvas');
+const bgCtx = backgroundCanvas.getContext('2d');
+const drawingCanvas = document.getElementById('drawingCanvas');
+const ctx = drawingCanvas.getContext('2d');
 const status = document.getElementById('status');
 
 let tool = 'pen';
 let color = '#000000';
 let size = 2;
 let drawing = false;
-let lastX, lastY;
+let currentStroke = null; // To store points for the current stroke
 let history = [];
 let redoStack = [];
 let scale = 1;
@@ -17,23 +17,24 @@ let prevOffsetX = 0, prevOffsetY = 0;
 let panVelocityX = 0, panVelocityY = 0;
 let isPanning = false;
 const GRID_SIZE = 20;
-const FRICTION = 0.92; // Slightly lower for smoother decay
-let rafId = null; // For throttling redraws
+const FRICTION = 0.92;
+let rafId = null;
 
 ctx.lineCap = 'round';
 ctx.lineJoin = 'round';
-drawingCtx.lineCap = 'round';
-drawingCtx.lineJoin = 'round';
+bgCtx.lineCap = 'round';
+bgCtx.lineJoin = 'round';
 
 const penTool = document.getElementById('penTool');
 const eraserTool = document.getElementById('eraserTool');
 const panTool = document.getElementById('panTool');
 
 function resizeCanvas() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight - document.getElementById('toolbar').offsetHeight;
-    drawingCanvas.width = canvas.width;
-    drawingCanvas.height = canvas.height;
+    backgroundCanvas.width = window.innerWidth;
+    backgroundCanvas.height = window.innerHeight - document.getElementById('toolbar').offsetHeight;
+    drawingCanvas.width = backgroundCanvas.width;
+    drawingCanvas.height = backgroundCanvas.height;
+    drawGrid();
     redraw();
 }
 window.addEventListener('resize', resizeCanvas);
@@ -41,7 +42,7 @@ resizeCanvas();
 
 function setTool(newTool) {
     tool = newTool;
-    canvas.style.cursor = tool === 'pan' ? 'grab' : 'crosshair';
+    drawingCanvas.style.cursor = tool === 'pan' ? 'grab' : 'crosshair';
     penTool.classList.toggle('active', tool === 'pen');
     eraserTool.classList.toggle('active', tool === 'eraser');
     panTool.classList.toggle('active', tool === 'pan');
@@ -68,17 +69,17 @@ function clearBoardWithConfirm() {
         scale = 1;
         offsetX = 0;
         offsetY = 0;
-        drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+        ctx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
         socket.send(JSON.stringify({ type: 'clear', history: [], scale: 1, offsetX: 0, offsetY: 0 }));
         redraw();
     }
 }
 
-canvas.addEventListener('pointerdown', startDrawing);
-canvas.addEventListener('pointermove', draw);
-canvas.addEventListener('pointerup', stopDrawing);
-canvas.addEventListener('pointerleave', stopDrawing);
-canvas.addEventListener('wheel', (e) => {
+drawingCanvas.addEventListener('pointerdown', startDrawing);
+drawingCanvas.addEventListener('pointermove', draw);
+drawingCanvas.addEventListener('pointerup', stopDrawing);
+drawingCanvas.addEventListener('pointerleave', stopDrawing);
+drawingCanvas.addEventListener('wheel', (e) => {
     e.preventDefault();
     zoom(e.deltaY > 0 ? 0.9 : 1.1);
 });
@@ -100,12 +101,12 @@ function startDrawing(e) {
     e.preventDefault();
     drawing = true;
     const { x, y } = getVirtualCoords(e);
-    [lastX, lastY] = [x, y];
     if (tool === 'pen' || tool === 'eraser') {
+        currentStroke = { type: 'draw', tool, color, size, points: [{ x, y, pressure: e.pressure || 1 }] };
         ctx.beginPath();
-        ctx.moveTo(lastX * scale + offsetX, lastY * scale + offsetY);
+        ctx.moveTo(x * scale + offsetX, y * scale + offsetY);
     } else if (tool === 'pan') {
-        canvas.style.cursor = 'grabbing';
+        drawingCanvas.style.cursor = 'grabbing';
         prevOffsetX = offsetX;
         prevOffsetY = offsetY;
         panVelocityX = 0;
@@ -115,46 +116,42 @@ function startDrawing(e) {
 
 function draw(e) {
     e.preventDefault();
-    if (!drawing) return;
+    if (!drawing || !e.buttons) return;
 
     const { x, y } = getVirtualCoords(e);
     const pressure = e.pressure || 1;
 
-    if (tool === 'pen' && e.buttons === 1) {
-        // Draw directly to the main canvas for responsiveness
+    if (tool === 'pen') {
         ctx.strokeStyle = color;
         ctx.lineWidth = size * scale * pressure;
         ctx.lineTo(x * scale + offsetX, y * scale + offsetY);
         ctx.stroke();
-        const action = { type: 'draw', tool: 'pen', color, size: size * pressure, lastX, lastY, x, y };
-        history.push(action);
-        redoStack = [];
-    } else if (tool === 'eraser' && e.buttons === 1) {
+        currentStroke.points.push({ x, y, pressure });
+    } else if (tool === 'eraser') {
         ctx.globalCompositeOperation = 'destination-out';
         ctx.beginPath();
         ctx.arc(x * scale + offsetX, y * scale + offsetY, size * scale * pressure, 0, Math.PI * 2);
         ctx.fill();
         ctx.globalCompositeOperation = 'source-over';
-        const action = { type: 'draw', tool: 'eraser', size: size * pressure, x, y };
-        history.push(action);
-        redoStack = [];
+        currentStroke.points.push({ x, y, pressure });
     } else if (tool === 'pan') {
         panBoard(e);
         throttleRedraw();
     }
-
-    [lastX, lastY] = [x, y];
 }
 
 function stopDrawing() {
     drawing = false;
     if (tool === 'pen' || tool === 'eraser') {
-        // Composite the current state to the offscreen canvas when the stroke ends
-        drawingCtx.drawImage(canvas, 0, 0);
-        socket.send(JSON.stringify({ type: 'update', history, scale, offsetX, offsetY }));
-        redraw(); // Full redraw to ensure grid and history are in sync
+        if (currentStroke) {
+            history.push(currentStroke);
+            redoStack = [];
+            socket.send(JSON.stringify({ type: 'update', history, scale, offsetX, offsetY }));
+            redraw();
+            currentStroke = null;
+        }
     } else if (tool === 'pan') {
-        canvas.style.cursor = 'grab';
+        drawingCanvas.style.cursor = 'grab';
         if (isPanning) {
             isPanning = false;
             requestAnimationFrame(applyPanInertia);
