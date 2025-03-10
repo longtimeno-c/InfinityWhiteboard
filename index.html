@@ -173,9 +173,9 @@
 
         function undo() {
             if (history.length === 0) return;
+            socket.send(JSON.stringify({ type: 'undo' }));
             const action = history.pop();
             redoStack.push(action);
-            socket.send(JSON.stringify({ type: 'undo' }));
             redraw();
         }
 
@@ -218,7 +218,7 @@
             offsetY = currentOffsetY;
         }
 
-        // Dynamic WebSocket URL based on current host
+        // Dynamic WebSocket URL based on current host (will be wss://watch.stream150.com/ws)
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsHost = window.location.host;
         const socket = new WebSocket(`${wsProtocol}//${wsHost}/ws`);
@@ -242,21 +242,30 @@
                     ctx.strokeStyle = data.color;
                     ctx.lineWidth = data.size;
                     ctx.stroke();
+                    history.push({ type: 'draw', tool: 'pen', color: data.color, size: data.size, lastX: data.lastX, lastY: data.lastY, x: data.x, y: data.y });
                 } else if (data.tool === 'eraser') {
                     ctx.globalCompositeOperation = 'destination-out';
                     ctx.beginPath();
                     ctx.arc(data.x, data.y, data.size, 0, Math.PI * 2);
                     ctx.fill();
                     ctx.globalCompositeOperation = 'source-over';
+                    history.push({ type: 'draw', tool: 'eraser', size: data.size, x: data.x, y: data.y });
                 }
             } else if (data.type === 'move') {
                 offsetX = data.offsetX;
                 offsetY = data.offsetY;
                 ctx.setTransform(1, 0, 0, 1, offsetX, offsetY);
+                history.push({ type: 'move', offsetX, offsetY });
             } else if (data.type === 'clear') {
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
-            } else if (data.type === 'undo' || data.type === 'redo') {
-                redraw();
+                history.push({ type: 'clear' });
+            } else if (data.type === 'undo') {
+                if (history.length > 0) {
+                    redoStack.push(history.pop());
+                    redraw();
+                }
+            } else if (data.type === 'redo') {
+                // Redo would need server-side support for a redo stack
             }
         };
 
