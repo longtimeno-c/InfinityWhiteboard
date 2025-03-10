@@ -19,7 +19,7 @@ function panBoard(e) {
 
 function drawGrid() {
     ctx.save();
-    ctx.setTransform(1, 0, 0, 1, offsetX, offsetY); // Align grid with foreground
+    ctx.setTransform(1, 0, 0, 1, offsetX, offsetY);
     ctx.scale(scale, scale);
     ctx.strokeStyle = '#e0e0e0';
     ctx.lineWidth = 0.5 / scale;
@@ -49,7 +49,7 @@ function redraw() {
     drawGrid(); // Draw grid aligned with offsetX/offsetY
     ctx.drawImage(drawingCanvas, 0, 0); // Composite drawing layer on top
 
-    // Update drawingCanvas with history
+    // Update drawingCanvas with history (only needed for undo/redo or external updates)
     drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
     drawingCtx.save();
     drawingCtx.translate(offsetX, offsetY);

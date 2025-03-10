@@ -103,8 +103,8 @@ function startDrawing(e) {
     drawing = true;
     const { x, y } = getVirtualCoords(e);
     currentStroke = { type: 'draw', tool, color, size, points: [{ x, y, pressure: e.pressure || 1 }] };
-    drawingCtx.beginPath();
-    drawingCtx.moveTo(x * scale + offsetX, y * scale + offsetY);
+    ctx.beginPath();
+    ctx.moveTo(x * scale + offsetX, y * scale + offsetY);
 }
 
 function draw(e) {
@@ -115,23 +115,21 @@ function draw(e) {
     const pressure = e.pressure || 1;
 
     if (tool === 'pen') {
-        drawingCtx.strokeStyle = color;
-        drawingCtx.lineWidth = size * scale * pressure;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = size * scale * pressure;
         const lastPoint = currentStroke.points[currentStroke.points.length - 1];
         const midX = (lastPoint.x + x) / 2;
         const midY = (lastPoint.y + y) / 2;
-        drawingCtx.quadraticCurveTo(lastPoint.x * scale + offsetX, lastPoint.y * scale + offsetY, midX * scale + offsetX, midY * scale + offsetY);
-        drawingCtx.stroke();
+        ctx.quadraticCurveTo(lastPoint.x * scale + offsetX, lastPoint.y * scale + offsetY, midX * scale + offsetX, midY * scale + offsetY);
+        ctx.stroke();
         currentStroke.points.push({ x, y, pressure });
-        redraw(); // Redraw to show real-time feedback
     } else if (tool === 'eraser') {
-        drawingCtx.globalCompositeOperation = 'destination-out';
-        drawingCtx.beginPath();
-        drawingCtx.arc(x * scale + offsetX, y * scale + offsetY, size * scale * pressure, 0, Math.PI * 2);
-        drawingCtx.fill();
-        drawingCtx.globalCompositeOperation = 'source-over';
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.beginPath();
+        ctx.arc(x * scale + offsetX, y * scale + offsetY, size * scale * pressure, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
         currentStroke.points.push({ x, y, pressure });
-        redraw(); // Redraw to update the drawing layer
     } else if (tool === 'pan') {
         panBoard(e);
         throttleRedraw();
@@ -144,7 +142,9 @@ function stopDrawing() {
         if (currentStroke) {
             history.push(currentStroke);
             redoStack = [];
+            drawingCtx.drawImage(canvas, 0, 0); // Update offscreen canvas with current state
             socket.send(JSON.stringify({ type: 'update', history, scale, offsetX, offsetY }));
+            redraw(); // Full redraw to sync grid and drawing
             currentStroke = null;
         }
     } else if (tool === 'pan') {
