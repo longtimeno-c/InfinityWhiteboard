@@ -385,7 +385,7 @@ function startDrawing(e) {
         tool, 
         color, 
         size, 
-        points: [{ x, y, pressure: e.pressure || 1 }] 
+        points: [{ x, y, pressure: 1 }] // Always use pressure 1 instead of e.pressure || 1
     };
     ctx.beginPath();
     ctx.moveTo(x * scale + offsetX, y * scale + offsetY);
@@ -396,11 +396,11 @@ function draw(e) {
     if (!drawing || !e.buttons) return;
 
     const { x, y } = getVirtualCoords(e);
-    const pressure = e.pressure || 1;
+    const pressure = 1; // Always use pressure 1 instead of e.pressure || 1
 
     if (tool === 'pen') {
         ctx.strokeStyle = color;
-        ctx.lineWidth = size * scale * pressure;
+        ctx.lineWidth = size * scale; // Remove pressure from the calculation
         const lastPoint = currentStroke.points[currentStroke.points.length - 1];
         const midX = (lastPoint.x + x) / 2;
         const midY = (lastPoint.y + y) / 2;
@@ -420,14 +420,14 @@ function draw(e) {
             const lastPoint = currentStroke.points[currentStroke.points.length - 1];
             drawingCtx.moveTo(lastPoint.x * scale + offsetX, lastPoint.y * scale + offsetY);
             drawingCtx.lineTo(x * scale + offsetX, y * scale + offsetY);
-            drawingCtx.lineWidth = eraserSize * scale * pressure;
+            drawingCtx.lineWidth = eraserSize * scale; // Remove pressure from the calculation
             drawingCtx.lineCap = 'round';
             drawingCtx.stroke();
         }
         
         // Add circular cap at current point for better erasing
         drawingCtx.beginPath();
-        drawingCtx.arc(x * scale + offsetX, y * scale + offsetY, (eraserSize/2) * scale * pressure, 0, Math.PI * 2);
+        drawingCtx.arc(x * scale + offsetX, y * scale + offsetY, (eraserSize/2) * scale, 0, Math.PI * 2); // Remove pressure from the calculation
         drawingCtx.fill();
         
         drawingCtx.restore();

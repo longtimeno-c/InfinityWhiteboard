@@ -81,8 +81,8 @@ function redraw() {
                 drawingCtx.moveTo(points[0].x, points[0].y);
                 
                 for (let i = 1; i < points.length; i++) {
-                    const pressure = points[i].pressure || 1;
-                    drawingCtx.lineWidth = (action.size || 2) * pressure;
+                    // Ignore pressure and use constant line width
+                    drawingCtx.lineWidth = action.size || 2;
                     
                     if (i === 1) {
                         // For the first segment, just draw a line
@@ -106,9 +106,9 @@ function redraw() {
                 }
                 
                 points.forEach(p => {
-                    const pressure = p.pressure || 1;
+                    // Ignore pressure and use constant eraser size
                     drawingCtx.beginPath();
-                    drawingCtx.arc(p.x, p.y, (action.size || 10) * pressure, 0, Math.PI * 2);
+                    drawingCtx.arc(p.x, p.y, action.size || 10, 0, Math.PI * 2);
                     drawingCtx.fill();
                 });
                 
