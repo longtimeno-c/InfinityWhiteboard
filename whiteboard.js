@@ -34,6 +34,7 @@ let offsetX = 0, offsetY = 0;
 let prevOffsetX = 0, prevOffsetY = 0;
 let panVelocityX = 0, panVelocityY = 0;
 let isPanning = false;
+let lastMouseX, lastMouseY; // Variables to track mouse position for panning
 const GRID_SIZE = 20;
 const FRICTION = 0.92;
 let rafId = null;
@@ -476,6 +477,21 @@ document.addEventListener('keydown', (e) => {
 
 function startDrawing(e) {
     e.preventDefault();
+    
+    if (tool === 'pan') {
+        // For pan tool, set panning state and update cursor
+        isPanning = true;
+        canvas.style.cursor = 'grabbing';
+        
+        // Initialize mouse position for panning
+        const rect = canvas.getBoundingClientRect();
+        lastMouseX = e.clientX - rect.left;
+        lastMouseY = e.clientY - rect.top;
+        
+        return;
+    }
+    
+    // For drawing tools (pen/eraser)
     drawing = true;
     const { x, y } = getVirtualCoords(e);
     currentStroke = { 
@@ -491,55 +507,63 @@ function startDrawing(e) {
 
 function draw(e) {
     e.preventDefault();
-    if (!drawing || !e.buttons) return;
+    
+    // For drawing tools, check if we're drawing and mouse button is down
+    if ((tool === 'pen' || tool === 'eraser') && (!drawing || !e.buttons)) return;
+    
+    // For pan tool, check if we're panning
+    if (tool === 'pan' && !isPanning) return;
 
-    const { x, y } = getVirtualCoords(e);
-    const pressure = 1; // Always use pressure 1 instead of e.pressure || 1
-
-    if (tool === 'pen') {
-        ctx.strokeStyle = color;
-        ctx.lineWidth = size * scale; // Remove pressure from the calculation
-        const lastPoint = currentStroke.points[currentStroke.points.length - 1];
-        const midX = (lastPoint.x + x) / 2;
-        const midY = (lastPoint.y + y) / 2;
-        ctx.quadraticCurveTo(lastPoint.x * scale + offsetX, lastPoint.y * scale + offsetY, midX * scale + offsetX, midY * scale + offsetY);
-        ctx.stroke();
-        currentStroke.points.push({ x, y, pressure });
-    } else if (tool === 'eraser') {
-        const eraserSize = size * 2; // Make eraser slightly larger than pen
+    if (tool === 'pen' || tool === 'eraser') {
+        const { x, y } = getVirtualCoords(e);
+        const pressure = 1; // Always use pressure 1 instead of e.pressure || 1
         
-        // Only apply eraser to the drawing canvas
-        drawingCtx.save();
-        drawingCtx.globalCompositeOperation = 'destination-out';
-        drawingCtx.beginPath();
-        
-        // Draw a path between points for continuous erasing
-        if (currentStroke.points.length > 0) {
+        if (tool === 'pen') {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = size * scale; // Remove pressure from the calculation
             const lastPoint = currentStroke.points[currentStroke.points.length - 1];
-            drawingCtx.moveTo(lastPoint.x * scale + offsetX, lastPoint.y * scale + offsetY);
-            drawingCtx.lineTo(x * scale + offsetX, y * scale + offsetY);
-            drawingCtx.lineWidth = eraserSize * scale; // Remove pressure from the calculation
-            drawingCtx.lineCap = 'round';
-            drawingCtx.stroke();
+            const midX = (lastPoint.x + x) / 2;
+            const midY = (lastPoint.y + y) / 2;
+            ctx.quadraticCurveTo(lastPoint.x * scale + offsetX, lastPoint.y * scale + offsetY, midX * scale + offsetX, midY * scale + offsetY);
+            ctx.stroke();
+            currentStroke.points.push({ x, y, pressure });
+        } else if (tool === 'eraser') {
+            const eraserSize = size * 2; // Make eraser slightly larger than pen
+            
+            // Only apply eraser to the drawing canvas
+            drawingCtx.save();
+            drawingCtx.globalCompositeOperation = 'destination-out';
+            drawingCtx.beginPath();
+            
+            // Draw a path between points for continuous erasing
+            if (currentStroke.points.length > 0) {
+                const lastPoint = currentStroke.points[currentStroke.points.length - 1];
+                drawingCtx.moveTo(lastPoint.x * scale + offsetX, lastPoint.y * scale + offsetY);
+                drawingCtx.lineTo(x * scale + offsetX, y * scale + offsetY);
+                drawingCtx.lineWidth = eraserSize * scale; // Remove pressure from the calculation
+                drawingCtx.lineCap = 'round';
+                drawingCtx.stroke();
+            }
+            
+            // Add circular cap at current point for better erasing
+            drawingCtx.beginPath();
+            drawingCtx.arc(x * scale + offsetX, y * scale + offsetY, (eraserSize/2) * scale, 0, Math.PI * 2); // Remove pressure from the calculation
+            drawingCtx.fill();
+            
+            drawingCtx.restore();
+            
+            // Clear the main canvas and redraw from drawing canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(drawingCanvas, 0, 0);
+            
+            currentStroke.type = 'erase'; // Make sure type is set to erase
+            currentStroke.size = eraserSize; // Store the larger eraser size
+            currentStroke.points.push({ x, y, pressure });
         }
-        
-        // Add circular cap at current point for better erasing
-        drawingCtx.beginPath();
-        drawingCtx.arc(x * scale + offsetX, y * scale + offsetY, (eraserSize/2) * scale, 0, Math.PI * 2); // Remove pressure from the calculation
-        drawingCtx.fill();
-        
-        drawingCtx.restore();
-        
-        // Clear the main canvas and redraw from drawing canvas
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(drawingCanvas, 0, 0);
-        
-        currentStroke.type = 'erase'; // Make sure type is set to erase
-        currentStroke.size = eraserSize; // Store the larger eraser size
-        currentStroke.points.push({ x, y, pressure });
     } else if (tool === 'pan') {
+        // Only call panBoard if we're actually panning (mouse button is down)
         panBoard(e);
-        throttleRedraw();
+        // throttleRedraw() is now called inside panBoard
         
         // Send pan updates to other clients (throttled)
         throttleSendPanUpdate();
@@ -587,6 +611,10 @@ function stopDrawing() {
         canvas.style.cursor = 'grab';
         if (isPanning) {
             isPanning = false;
+            
+            // Reset mouse tracking variables
+            lastMouseX = undefined;
+            lastMouseY = undefined;
             
             // Send final pan position
             socket.send(JSON.stringify({ 

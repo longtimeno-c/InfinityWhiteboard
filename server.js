@@ -169,23 +169,21 @@ function getUserByUsername(username) {
 
 // Function to check if a username is randomly generated
 function isRandomlyGeneratedUsername(username) {
-    // Check for patterns that match our random username format
-    // This should match the pattern in the client-side generateRandomUsername function
+    // List of words used in random username generation
     const adjectives = ['Creative', 'Artistic', 'Clever', 'Bright', 'Colorful', 'Dazzling', 'Elegant', 'Fancy', 'Glowing', 'Happy'];
     const nouns = ['Artist', 'Painter', 'Creator', 'Designer', 'Sketcher', 'Drawer', 'Illustrator', 'Doodler', 'Visionary', 'Genius'];
     
-    // Check if the username starts with any of our adjectives
-    const startsWithAdjective = adjectives.some(adj => username.startsWith(adj));
+    // Check if the username contains any of our adjectives
+    const hasAdjective = adjectives.some(adj => username.includes(adj));
     
-    // Check if the username contains any of our nouns followed by numbers
-    const containsNounAndNumbers = nouns.some(noun => {
-        const nounIndex = username.indexOf(noun);
-        return nounIndex > 0 && 
-               nounIndex + noun.length < username.length && 
-               /^\d+$/.test(username.substring(nounIndex + noun.length));
-    });
+    // Check if the username contains any of our nouns
+    const hasNoun = nouns.some(noun => username.includes(noun));
     
-    return startsWithAdjective && containsNounAndNumbers;
+    // Check if the username contains numbers
+    const hasNumbers = /\d/.test(username);
+    
+    // Consider it randomly generated if it contains both an adjective/noun AND numbers
+    return (hasAdjective || hasNoun) && hasNumbers;
 }
 
 // Add or update a user

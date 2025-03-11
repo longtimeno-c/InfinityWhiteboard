@@ -6,15 +6,39 @@ function getVirtualCoords(e) {
 }
 
 function panBoard(e) {
-    isPanning = true;
-    const deltaX = e.movementX;
-    const deltaY = e.movementY;
-    offsetX = prevOffsetX + deltaX;
-    offsetY = prevOffsetY + deltaY;
+    if (!isPanning) return;
+    
+    // Get current mouse position
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    
+    // If this is the first move after starting to pan, initialize lastMouseX/Y
+    if (typeof lastMouseX === 'undefined') {
+        lastMouseX = mouseX;
+        lastMouseY = mouseY;
+        return;
+    }
+    
+    // Calculate the movement delta with reduced sensitivity
+    const sensitivity = 0.5; // Reduce this value to make panning less sensitive
+    const deltaX = (mouseX - lastMouseX) * sensitivity;
+    const deltaY = (mouseY - lastMouseY) * sensitivity;
+    
+    // Update offsets
+    offsetX += deltaX;
+    offsetY += deltaY;
+    
+    // Update velocity for inertia (also apply sensitivity to inertia)
     panVelocityX = deltaX * 0.5;
     panVelocityY = deltaY * 0.5;
-    prevOffsetX = offsetX;
-    prevOffsetY = offsetY;
+    
+    // Store current position for next move
+    lastMouseX = mouseX;
+    lastMouseY = mouseY;
+    
+    // Update the canvas
+    redraw();
 }
 
 function drawGrid() {
