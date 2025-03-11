@@ -560,25 +560,45 @@ Promise.all([loadBoardsState(), loadUsersState()]).then(() => {
                     }
                     
                 } else if (data.type === 'clear_user') {
-                    // Check if user is admin
-                    if (clientInfo.isAdmin) {
-                    // Filter out actions by the specified username on the current board
-                    if (data.username && boards[boardId]) {
-                        boards[boardId].actions = boards[boardId].actions.filter(action => action.username !== data.username);
-                        debouncedSave();
-                        
-                        // Broadcast the clear_user command to clients on the same board
-                        broadcastToBoard(boardId, JSON.stringify({ 
-                            type: 'clear_user', 
-                            username: data.username,
-                            boardId: boardId
+                    // Check if user is admin or if they're clearing their own content
+                    if (clientInfo.isAdmin || (data.username === clientInfo.username)) {
+                        // Filter out actions by the specified username on the current board
+                        if (data.username && boards[boardId]) {
+                            console.log(`Clearing content for user ${data.username} on board ${boardId}`);
+                            
+                            // Count actions before filtering
+                            const beforeCount = boards[boardId].actions.length;
+                            
+                            // Filter out actions by the specified username
+                            boards[boardId].actions = boards[boardId].actions.filter(action => {
+                                return action.username !== data.username;
+                            });
+                            
+                            // Count actions after filtering
+                            const afterCount = boards[boardId].actions.length;
+                            console.log(`Removed ${beforeCount - afterCount} actions for user ${data.username}`);
+                            
+                            debouncedSave();
+                            
+                            // Broadcast the clear_user command to clients on the same board
+                            broadcastToBoard(boardId, JSON.stringify({ 
+                                type: 'clear_user', 
+                                username: data.username,
+                                boardId: boardId
+                            }));
+                        } else {
+                            console.error(`Invalid clear_user request: username=${data.username}, boardId=${boardId}`);
+                            ws.send(JSON.stringify({
+                                type: 'error',
+                                message: 'Invalid clear request: missing username or board not found'
                             }));
                         }
                     } else {
                         // Send access denied message
+                        console.error(`Access denied: ${clientInfo.username} tried to clear content for ${data.username}`);
                         ws.send(JSON.stringify({
                             type: 'error',
-                            message: 'Only admins can clear user content'
+                            message: 'Only admins can clear other users\' content'
                         }));
                     }
                     

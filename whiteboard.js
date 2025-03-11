@@ -405,63 +405,49 @@ clearOwnBtn.addEventListener('click', () => {
     clearUserContent();
 });
 
-clearAllBtn.addEventListener('click', () => {
-    hideClearOptionsModal();
-    clearAllContent();
-});
-
-cancelClearBtn.addEventListener('click', hideClearOptionsModal);
-
 function showClearOptionsModal() {
-    clearOptionsModal.style.display = 'flex';
-}
-
-function hideClearOptionsModal() {
-    clearOptionsModal.style.display = 'none';
-}
-
-function clearBoardWithConfirm() {
-    // Special handling for user named "Shaun"
-    if (username === "Shaun") {
-        // Show the custom modal with options
-        showClearOptionsModal();
-    } else {
-        // For all other users, just ask if they want to clear their own content
-        if (confirm('Are you sure you want to clear your own content from the current board?')) {
-            clearUserContent();
-        }
+    const clearAllBtn = document.getElementById('clear-all-btn');
+    
+    // Only show the "Clear All Content" button for admins
+    if (clearAllBtn) {
+        clearAllBtn.style.display = isAdmin ? 'block' : 'none';
+    }
+    
+    if (clearOptionsModal) {
+        clearOptionsModal.classList.add('show');
     }
 }
 
+function hideClearOptionsModal() {
+    const clearOptionsModal = document.getElementById('clear-options-modal');
+    if (clearOptionsModal) {
+        clearOptionsModal.classList.remove('show');
+    }
+}
+
+function clearBoardWithConfirm() {
+    // Show the clear options modal
+    showClearOptionsModal();
+}
+
 function clearUserContent() {
-    // Filter out the current user's strokes from history
-    const filteredHistory = history.filter(stroke => stroke.username !== username);
-    
-    // Send clear user command to server
-    socket.send(JSON.stringify({ 
-        type: 'clear_user', 
-        username: username 
-    }));
-    
-    // Local clear (will be overwritten when server responds)
-    history = filteredHistory;
-    redoStack = [];
-    drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
-    redraw();
+    if (socket && socket.readyState === WebSocket.OPEN && username) {
+        console.log(`Clearing content for user: ${username}`);
+        socket.send(JSON.stringify({
+            type: 'clear_user',
+            username: username
+        }));
+    } else {
+        console.error('Cannot clear user content: socket not connected or username not set');
+    }
 }
 
 function clearAllContent() {
-    // Send clear command to server
-    socket.send(JSON.stringify({ type: 'clear' }));
-    
-    // Local clear (will be overwritten when server responds)
-    history = [];
-    redoStack = [];
-    scale = 1;
-    offsetX = 0;
-    offsetY = 0;
-    drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
-    redraw();
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+            type: 'clear'
+        }));
+    }
 }
 
 canvas.addEventListener('pointerdown', startDrawing);
@@ -704,7 +690,7 @@ function initWhiteboard() {
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
         if (e.key === 'p' || e.key === 'P') {
-    setTool('pen');
+            setTool('pen');
         } else if (e.key === 'e' || e.key === 'E') {
             setTool('eraser');
         } else if (e.key === ' ') {
@@ -737,17 +723,23 @@ function initWhiteboard() {
     animate();
     
     // Set up clear options modal buttons
-    document.getElementById('clear-own-btn').addEventListener('click', () => {
-        clearUserContent();
-    hideClearOptionsModal();
-    });
+    if (clearOwnBtn) {
+        clearOwnBtn.addEventListener('click', () => {
+            clearUserContent();
+            hideClearOptionsModal();
+        });
+    }
     
-    document.getElementById('clear-all-btn').addEventListener('click', () => {
-        clearAllContent();
-        hideClearOptionsModal();
-    });
+    if (clearAllBtn) {
+        clearAllBtn.addEventListener('click', () => {
+            clearAllContent();
+            hideClearOptionsModal();
+        });
+    }
     
-    document.getElementById('cancel-clear-btn').addEventListener('click', hideClearOptionsModal);
+    if (cancelClearBtn) {
+        cancelClearBtn.addEventListener('click', hideClearOptionsModal);
+    }
 }
 
 // Function to initialize the board panel
@@ -850,7 +842,7 @@ function setupWebSocket() {
                 // Apply the initial state
                 if (data.state && data.state.actions) {
                     history = data.state.actions;
-                redraw();
+                    redraw();
                 }
                 
                 // Update board selector
@@ -865,7 +857,7 @@ function setupWebSocket() {
             } else if (data.type === 'boards_list') {
                 // Update the list of boards
                 boards = data.boards || [];
-                    updateBoardSelector();
+                updateBoardSelector();
             } else if (data.type === 'board_state') {
                 // Handle board state update
                 if (data.boardId) {
@@ -875,8 +867,8 @@ function setupWebSocket() {
                     if (data.state && data.state.actions) {
                         history = data.state.actions;
                         redoStack = []; // Clear redo stack when switching boards
-                    redraw();
-                    updateBoardSelector();
+                        redraw();
+                        updateBoardSelector();
                         
                         // Update UI based on write access
                         updateWriteAccessUI(data.canWrite);
@@ -893,13 +885,14 @@ function setupWebSocket() {
             } else if (data.type === 'clear') {
                 // Handle board clear
                 if (data.boardId === currentBoardId) {
-                history = [];
-                redoStack = [];
-                redraw();
+                    history = [];
+                    redoStack = [];
+                    redraw();
                 }
             } else if (data.type === 'clear_user') {
                 // Handle clearing a specific user's content
                 if (data.boardId === currentBoardId) {
+                    console.log(`Clearing content for user: ${data.username}`);
                     history = history.filter(action => action.username !== data.username);
                     redraw();
                 }
@@ -907,7 +900,7 @@ function setupWebSocket() {
                 // Handle full state update
                 if (data.boardId === currentBoardId && data.state && data.state.actions) {
                     history = data.state.actions;
-                redraw();
+                    redraw();
                 }
             } else if (data.type === 'user_update') {
                 // Handle user updates (e.g., username changes)
@@ -942,6 +935,7 @@ function setupWebSocket() {
                 updateWriteAccessUI(data.canWrite);
             } else if (data.type === 'error') {
                 // Display error message
+                console.error(`Server error: ${data.message}`);
                 alert(data.message);
             }
         } catch (error) {
