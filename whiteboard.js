@@ -771,20 +771,16 @@ function initBoardPanel() {
         }
     }
     
-    // Add external toggle button
-    if (!boardPanel.querySelector('.panel-toggle')) {
-        const externalToggle = document.createElement('button');
-        externalToggle.className = 'panel-toggle';
-        externalToggle.innerHTML = '<i class="fas fa-th-list"></i>';
-        externalToggle.setAttribute('data-tooltip', 'Open Boards Panel');
-        externalToggle.addEventListener('click', () => {
+    // Set up the board panel tab for reopening
+    const boardPanelTab = document.getElementById('board-panel-tab');
+    if (boardPanelTab) {
+        boardPanelTab.addEventListener('click', () => {
             boardPanel.classList.remove('collapsed');
             const toggleBtn = boardPanel.querySelector('.panel-header .tool-button');
             if (toggleBtn) {
                 toggleBtn.querySelector('i').className = 'fas fa-chevron-right';
             }
         });
-        boardPanel.appendChild(externalToggle);
     }
 }
 
@@ -982,16 +978,15 @@ function createAdminPanel() {
     panelHeader.appendChild(panelTitle);
     panelHeader.appendChild(toggleButton);
     
-    // Create external toggle button (visible when panel is collapsed)
-    const externalToggle = document.createElement('button');
-    externalToggle.className = 'panel-toggle';
-    externalToggle.innerHTML = '<i class="fas fa-cog"></i>';
-    externalToggle.setAttribute('data-tooltip', 'Open Admin Panel');
-    externalToggle.addEventListener('click', () => {
+    // Create admin panel tab for reopening
+    const adminPanelTab = document.createElement('button');
+    adminPanelTab.id = 'admin-panel-tab';
+    adminPanelTab.textContent = 'Admin';
+    adminPanelTab.addEventListener('click', () => {
         adminPanel.classList.remove('collapsed');
         toggleButton.querySelector('i').className = 'fas fa-chevron-left';
     });
-    adminPanel.appendChild(externalToggle);
+    document.body.appendChild(adminPanelTab);
     
     // Create panel content
     const panelContent = document.createElement('div');

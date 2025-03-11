@@ -167,10 +167,35 @@ function getUserByUsername(username) {
     return users.users.find(u => u.username === username);
 }
 
+// Function to check if a username is randomly generated
+function isRandomlyGeneratedUsername(username) {
+    // Check for patterns that match our random username format
+    // This should match the pattern in the client-side generateRandomUsername function
+    const adjectives = ['Creative', 'Artistic', 'Clever', 'Bright', 'Colorful', 'Dazzling', 'Elegant', 'Fancy', 'Glowing', 'Happy'];
+    const nouns = ['Artist', 'Painter', 'Creator', 'Designer', 'Sketcher', 'Drawer', 'Illustrator', 'Doodler', 'Visionary', 'Genius'];
+    
+    // Check if the username starts with any of our adjectives
+    const startsWithAdjective = adjectives.some(adj => username.startsWith(adj));
+    
+    // Check if the username contains any of our nouns followed by numbers
+    const containsNounAndNumbers = nouns.some(noun => {
+        const nounIndex = username.indexOf(noun);
+        return nounIndex > 0 && 
+               nounIndex + noun.length < username.length && 
+               /^\d+$/.test(username.substring(nounIndex + noun.length));
+    });
+    
+    return startsWithAdjective && containsNounAndNumbers;
+}
+
 // Add or update a user
 function addOrUpdateUser(username) {
+    // Check if the username appears to be randomly generated
+    const isRandomUsername = isRandomlyGeneratedUsername(username);
+    
     const existingUser = users.users.find(u => u.username === username);
-    if (!existingUser) {
+    if (!existingUser && !isRandomUsername) {
+        // Only store non-random usernames
         const userId = username.toLowerCase().replace(/[^a-z0-9]/g, '');
         users.users.push({
             id: userId,
@@ -179,7 +204,11 @@ function addOrUpdateUser(username) {
         });
         saveUsersState();
     }
-    return users.users.find(u => u.username === username);
+    return users.users.find(u => u.username === username) || {
+        id: username.toLowerCase().replace(/[^a-z0-9]/g, ''),
+        username: username,
+        isAdmin: false
+    };
 }
 
 // Load both boards and users state
