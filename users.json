@@ -14,18 +14,20 @@
   "boardAccess": {
     "default": {
       "readAccess": [
-        "*"
-      ],
-      "writeAccess": []
-    },
-    "0ba4bee8-6d68-4329-9935-46f1dbfa87d6": {
-      "readAccess": [
-        "Shaun",
+        "*",
         "GlowingSketcher249"
       ],
       "writeAccess": [
-        "Shaun",
+        "*",
         "GlowingSketcher249"
+      ]
+    },
+    "0ba4bee8-6d68-4329-9935-46f1dbfa87d6": {
+      "readAccess": [
+        "Shaun"
+      ],
+      "writeAccess": [
+        "Shaun"
       ]
     }
   }

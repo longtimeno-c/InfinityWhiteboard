@@ -259,19 +259,19 @@ Promise.all([loadBoardsState(), loadUsersState()]).then(() => {
                     if (boards[newBoardId]) {
                         // Check if user has read access to the board
                         if (clientInfo.username && hasReadAccess(clientInfo.username, newBoardId)) {
-                            // Update client's current board
-                            clientInfo.currentBoard = newBoardId;
-                            clients.set(ws, clientInfo);
-                            
-                            // Send the board state to the client
-                            ws.send(JSON.stringify({
-                                type: 'board_state',
-                                boardId: newBoardId,
+                        // Update client's current board
+                        clientInfo.currentBoard = newBoardId;
+                        clients.set(ws, clientInfo);
+                        
+                        // Send the board state to the client
+                        ws.send(JSON.stringify({
+                            type: 'board_state',
+                            boardId: newBoardId,
                                 state: boards[newBoardId],
                                 canWrite: hasWriteAccess(clientInfo.username, newBoardId)
-                            }));
-                            
-                            console.log(`Client ${clientId} switched to board: ${newBoardId}`);
+                        }));
+                        
+                        console.log(`Client ${clientId} switched to board: ${newBoardId}`);
                         } else {
                             // Send access denied message
                             ws.send(JSON.stringify({
@@ -332,16 +332,16 @@ Promise.all([loadBoardsState(), loadUsersState()]).then(() => {
                     if (boards[boardId] && newName) {
                         // Check if user has write access or is admin
                         if (clientInfo.isAdmin || (clientInfo.username && hasWriteAccess(clientInfo.username, boardId))) {
-                            boards[boardId].name = newName;
-                            debouncedSave();
-                            
-                            // Broadcast board list update to all clients
-                            broadcast(JSON.stringify({
-                                type: 'boards_list',
-                                boards: Object.keys(boards).map(id => ({ id, name: boards[id].name }))
-                            }));
-                            
-                            console.log(`Board ${boardId} renamed to: ${newName}`);
+                        boards[boardId].name = newName;
+                        debouncedSave();
+                        
+                        // Broadcast board list update to all clients
+                        broadcast(JSON.stringify({
+                            type: 'boards_list',
+                            boards: Object.keys(boards).map(id => ({ id, name: boards[id].name }))
+                        }));
+                        
+                        console.log(`Board ${boardId} renamed to: ${newName}`);
                         } else {
                             // Send access denied message
                             ws.send(JSON.stringify({
@@ -367,8 +367,8 @@ Promise.all([loadBoardsState(), loadUsersState()]).then(() => {
                     if (boards[boardId]) {
                         // Check if user is admin
                         if (clientInfo.isAdmin) {
-                            // Delete the board
-                            delete boards[boardId];
+                        // Delete the board
+                        delete boards[boardId];
                             
                             // Delete access rights for the board
                             if (users.boardAccess[boardId]) {
@@ -376,31 +376,31 @@ Promise.all([loadBoardsState(), loadUsersState()]).then(() => {
                                 saveUsersState();
                             }
                             
-                            debouncedSave();
-                            
-                            // Move all clients on this board to the default board
-                            for (const [client, info] of clients.entries()) {
-                                if (info.currentBoard === boardId) {
-                                    info.currentBoard = 'default';
-                                    clients.set(client, info);
-                                    
-                                    // Send the default board state to affected clients
-                                    client.send(JSON.stringify({
-                                        type: 'board_state',
-                                        boardId: 'default',
+                        debouncedSave();
+                        
+                        // Move all clients on this board to the default board
+                        for (const [client, info] of clients.entries()) {
+                            if (info.currentBoard === boardId) {
+                                info.currentBoard = 'default';
+                                clients.set(client, info);
+                                
+                                // Send the default board state to affected clients
+                                client.send(JSON.stringify({
+                                    type: 'board_state',
+                                    boardId: 'default',
                                         state: boards.default,
                                         canWrite: hasWriteAccess(info.username, 'default')
-                                    }));
-                                }
+                                }));
                             }
-                            
-                            // Broadcast board list update to all clients
-                            broadcast(JSON.stringify({
-                                type: 'boards_list',
-                                boards: Object.keys(boards).map(id => ({ id, name: boards[id].name }))
-                            }));
-                            
-                            console.log(`Board ${boardId} deleted`);
+                        }
+                        
+                        // Broadcast board list update to all clients
+                        broadcast(JSON.stringify({
+                            type: 'boards_list',
+                            boards: Object.keys(boards).map(id => ({ id, name: boards[id].name }))
+                        }));
+                        
+                        console.log(`Board ${boardId} deleted`);
                         } else {
                             // Send access denied message
                             ws.send(JSON.stringify({
@@ -488,19 +488,19 @@ Promise.all([loadBoardsState(), loadUsersState()]).then(() => {
                 } else if (data.type === 'draw' || data.type === 'erase') {
                     // Check write access
                     if (clientInfo.username && hasWriteAccess(clientInfo.username, boardId)) {
-                        // Add username to the action if available
-                        if (clientInfo && clientInfo.username) {
-                            data.username = clientInfo.username;
-                        }
-                        
-                        // Add the action to board state
-                        if (boards[boardId]) {
-                            boards[boardId].actions.push(data);
-                            debouncedSave();
-                        }
-                        
-                        // Broadcast to clients on the same board
-                        broadcastToBoard(boardId, JSON.stringify(data), ws);
+                    // Add username to the action if available
+                    if (clientInfo && clientInfo.username) {
+                        data.username = clientInfo.username;
+                    }
+                    
+                    // Add the action to board state
+                    if (boards[boardId]) {
+                        boards[boardId].actions.push(data);
+                        debouncedSave();
+                    }
+                    
+                    // Broadcast to clients on the same board
+                    broadcastToBoard(boardId, JSON.stringify(data), ws);
                     } else {
                         // Send access denied message
                         ws.send(JSON.stringify({
@@ -512,21 +512,21 @@ Promise.all([loadBoardsState(), loadUsersState()]).then(() => {
                 } else if (data.type === 'undo') {
                     // Check write access
                     if (clientInfo.username && hasWriteAccess(clientInfo.username, boardId)) {
-                        // Find the last action by this client and remove it
-                        if (boards[boardId]) {
-                            for (let i = boards[boardId].actions.length - 1; i >= 0; i--) {
-                                if (boards[boardId].actions[i].clientId === clientId) {
-                                    boards[boardId].actions.splice(i, 1);
-                                    break;
-                                }
+                    // Find the last action by this client and remove it
+                    if (boards[boardId]) {
+                        for (let i = boards[boardId].actions.length - 1; i >= 0; i--) {
+                            if (boards[boardId].actions[i].clientId === clientId) {
+                                boards[boardId].actions.splice(i, 1);
+                                break;
                             }
-                            debouncedSave();
-                            
-                            // Broadcast the updated state to clients on the same board
-                            broadcastToBoard(boardId, JSON.stringify({ 
-                                type: 'update', 
-                                state: boards[boardId],
-                                boardId: boardId
+                        }
+                        debouncedSave();
+                        
+                        // Broadcast the updated state to clients on the same board
+                        broadcastToBoard(boardId, JSON.stringify({ 
+                            type: 'update', 
+                            state: boards[boardId],
+                            boardId: boardId
                             }));
                         }
                     } else {
@@ -540,15 +540,15 @@ Promise.all([loadBoardsState(), loadUsersState()]).then(() => {
                 } else if (data.type === 'clear') {
                     // Check if user is admin or has write access
                     if (clientInfo.isAdmin || (clientInfo.username && hasWriteAccess(clientInfo.username, boardId))) {
-                        // Clear only the current board
-                        if (boards[boardId]) {
-                            boards[boardId].actions = [];
-                            debouncedSave();
-                            
-                            // Broadcast clear command to clients on the same board
-                            broadcastToBoard(boardId, JSON.stringify({ 
-                                type: 'clear',
-                                boardId: boardId
+                    // Clear only the current board
+                    if (boards[boardId]) {
+                        boards[boardId].actions = [];
+                        debouncedSave();
+                        
+                        // Broadcast clear command to clients on the same board
+                        broadcastToBoard(boardId, JSON.stringify({ 
+                            type: 'clear',
+                            boardId: boardId
                             }));
                         }
                     } else {
@@ -562,16 +562,16 @@ Promise.all([loadBoardsState(), loadUsersState()]).then(() => {
                 } else if (data.type === 'clear_user') {
                     // Check if user is admin
                     if (clientInfo.isAdmin) {
-                        // Filter out actions by the specified username on the current board
-                        if (data.username && boards[boardId]) {
-                            boards[boardId].actions = boards[boardId].actions.filter(action => action.username !== data.username);
-                            debouncedSave();
-                            
-                            // Broadcast the clear_user command to clients on the same board
-                            broadcastToBoard(boardId, JSON.stringify({ 
-                                type: 'clear_user', 
-                                username: data.username,
-                                boardId: boardId
+                    // Filter out actions by the specified username on the current board
+                    if (data.username && boards[boardId]) {
+                        boards[boardId].actions = boards[boardId].actions.filter(action => action.username !== data.username);
+                        debouncedSave();
+                        
+                        // Broadcast the clear_user command to clients on the same board
+                        broadcastToBoard(boardId, JSON.stringify({ 
+                            type: 'clear_user', 
+                            username: data.username,
+                            boardId: boardId
                             }));
                         }
                     } else {

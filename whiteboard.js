@@ -105,10 +105,10 @@ function saveUsername() {
         
         // Send username to server
         if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({
-                type: 'username',
-                username: username
-            }));
+        socket.send(JSON.stringify({ 
+            type: 'username', 
+            username: username 
+        }));
         }
     }
 }
@@ -142,11 +142,11 @@ function switchBoard(boardId) {
     
     if (socket && socket.readyState === WebSocket.OPEN) {
         // Send board switch request to server
-        socket.send(JSON.stringify({
-            type: 'switch_board',
-            boardId: boardId
-        }));
-        
+    socket.send(JSON.stringify({
+        type: 'switch_board',
+        boardId: boardId
+    }));
+    
         // Update admin panel if admin
         if (isAdmin && adminPanel) {
             setTimeout(() => {
@@ -203,6 +203,25 @@ function deleteBoard(boardId) {
 function updateBoardSelector() {
     const boardSelector = document.getElementById('board-selector');
     if (!boardSelector) return;
+    
+    // Check if the toggle button exists, if not create it
+    if (!document.querySelector('#board-panel .panel-toggle')) {
+        const boardPanel = document.getElementById('board-panel');
+        if (boardPanel) {
+            const externalToggle = document.createElement('button');
+            externalToggle.className = 'panel-toggle';
+            externalToggle.innerHTML = '<i class="fas fa-th-list"></i>';
+            externalToggle.setAttribute('data-tooltip', 'Open Boards Panel');
+            externalToggle.addEventListener('click', () => {
+                boardPanel.classList.remove('collapsed');
+                const toggleBtn = boardPanel.querySelector('.panel-header .tool-button');
+                if (toggleBtn) {
+                    toggleBtn.querySelector('i').className = 'fas fa-chevron-right';
+                }
+            });
+            boardPanel.appendChild(externalToggle);
+        }
+    }
     
     // Clear existing options
     boardSelector.innerHTML = '';
@@ -290,6 +309,37 @@ function updateBoardSelector() {
                 }
             });
             actionButtons.appendChild(deleteButton);
+        }
+        
+        // Manage access button (admin only)
+        if (isAdmin) {
+            const accessButton = document.createElement('button');
+            accessButton.className = 'board-action-btn';
+            accessButton.innerHTML = '<i class="fas fa-users"></i>';
+            accessButton.title = 'Manage access rights';
+            accessButton.addEventListener('click', (e) => {
+                e.stopPropagation();
+                // Switch to this board and open admin panel
+                switchBoard(board.id);
+                
+                // Open admin panel if it's collapsed
+                if (adminPanel && adminPanel.classList.contains('collapsed')) {
+                    adminPanel.classList.remove('collapsed');
+                    const toggleBtn = adminPanel.querySelector('.panel-header .tool-button');
+                    if (toggleBtn) {
+                        toggleBtn.querySelector('i').className = 'fas fa-chevron-left';
+                    }
+                }
+                
+                // Scroll to access rights section
+                setTimeout(() => {
+                    const accessSection = document.querySelector('#admin-panel .admin-section:nth-child(2)');
+                    if (accessSection) {
+                        accessSection.scrollIntoView({ behavior: 'smooth' });
+                    }
+                }, 300);
+            });
+            actionButtons.appendChild(accessButton);
         }
         
         boardItem.appendChild(actionButtons);
@@ -612,39 +662,139 @@ function redo() {
 
 // Initialize the whiteboard
 function initWhiteboard() {
-    // Set up canvas and context
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    drawingCtx.lineCap = 'round';
-    drawingCtx.lineJoin = 'round';
-    
-    // Resize canvas to fit window
+    // Resize canvas to fill window
     resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
     
-    // Set default tool
-    setTool('pen');
-    
-    // Initialize the clear options modal
-    hideClearOptionsModal();
-    
-    // Force an initial redraw
-    setTimeout(() => {
-        console.log('Initial whiteboard setup complete');
-        redraw();
-    }, 500);
+    // Initialize board panel
+    initBoardPanel();
     
     // Setup WebSocket connection
     setupWebSocket();
+    
+    // Set up event listeners
+    canvas.addEventListener('mousedown', startDrawing);
+    canvas.addEventListener('mousemove', draw);
+    canvas.addEventListener('mouseup', stopDrawing);
+    canvas.addEventListener('mouseout', stopDrawing);
+    
+    // Touch support
+    canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const touch = e.touches[0];
+        startDrawing({
+            clientX: touch.clientX,
+            clientY: touch.clientY,
+            preventDefault: () => {}
+        });
+    });
+    
+    canvas.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        const touch = e.touches[0];
+        draw({
+            clientX: touch.clientX,
+            clientY: touch.clientY,
+            preventDefault: () => {}
+        });
+    });
+    
+    canvas.addEventListener('touchend', stopDrawing);
+    
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'p' || e.key === 'P') {
+    setTool('pen');
+        } else if (e.key === 'e' || e.key === 'E') {
+            setTool('eraser');
+        } else if (e.key === ' ') {
+            // Space bar for pan tool
+            e.preventDefault(); // Prevent page scroll
+            setTool('pan');
+        } else if (e.ctrlKey && (e.key === 'z' || e.key === 'Z')) {
+            e.preventDefault();
+            undo();
+        } else if (e.ctrlKey && (e.key === 'y' || e.key === 'Y')) {
+            e.preventDefault();
+            redo();
+        }
+    });
+    
+    document.addEventListener('keyup', (e) => {
+        if (e.key === ' ' && tool === 'pan') {
+            // Return to previous tool when space is released
+            setTool(prevTool || 'pen');
+        }
+    });
+    
+    // Set up animation loop for smooth panning
+    function animate() {
+        if (isPanning) {
+            applyPanInertia();
+        }
+        rafId = requestAnimationFrame(animate);
+    }
+    animate();
+    
+    // Set up clear options modal buttons
+    document.getElementById('clear-own-btn').addEventListener('click', () => {
+        clearUserContent();
+    hideClearOptionsModal();
+    });
+    
+    document.getElementById('clear-all-btn').addEventListener('click', () => {
+        clearAllContent();
+        hideClearOptionsModal();
+    });
+    
+    document.getElementById('cancel-clear-btn').addEventListener('click', hideClearOptionsModal);
 }
 
-// Call init function when page loads
-document.addEventListener('DOMContentLoaded', () => {
-    // Initialize username first
-    initUsername();
+// Function to initialize the board panel
+function initBoardPanel() {
+    const boardPanel = document.getElementById('board-panel');
+    if (!boardPanel) return;
     
-    // Then initialize whiteboard and WebSocket
-    initWhiteboard();
-});
+    // Add toggle button to panel header
+    const panelHeader = boardPanel.querySelector('.panel-header');
+    if (panelHeader) {
+        const toggleButton = panelHeader.querySelector('.tool-button');
+        if (!toggleButton) {
+            const newToggleButton = document.createElement('button');
+            newToggleButton.className = 'tool-button';
+            newToggleButton.setAttribute('data-tooltip', 'Toggle Board Panel');
+            newToggleButton.innerHTML = '<i class="fas fa-chevron-right"></i>';
+            newToggleButton.addEventListener('click', () => {
+                boardPanel.classList.toggle('collapsed');
+                
+                // Update the icon
+                const icon = newToggleButton.querySelector('i');
+                if (boardPanel.classList.contains('collapsed')) {
+                    icon.className = 'fas fa-chevron-left';
+                } else {
+                    icon.className = 'fas fa-chevron-right';
+                }
+            });
+            panelHeader.appendChild(newToggleButton);
+        }
+    }
+    
+    // Add external toggle button
+    if (!boardPanel.querySelector('.panel-toggle')) {
+        const externalToggle = document.createElement('button');
+        externalToggle.className = 'panel-toggle';
+        externalToggle.innerHTML = '<i class="fas fa-th-list"></i>';
+        externalToggle.setAttribute('data-tooltip', 'Open Boards Panel');
+        externalToggle.addEventListener('click', () => {
+            boardPanel.classList.remove('collapsed');
+            const toggleBtn = boardPanel.querySelector('.panel-header .tool-button');
+            if (toggleBtn) {
+                toggleBtn.querySelector('i').className = 'fas fa-chevron-right';
+            }
+        });
+        boardPanel.appendChild(externalToggle);
+    }
+}
 
 function setupWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -660,9 +810,9 @@ function setupWebSocket() {
         
         // Send username if available
         if (username) {
-            socket.send(JSON.stringify({
-                type: 'username',
-                username: username
+            socket.send(JSON.stringify({ 
+                type: 'username', 
+                username: username 
             }));
         }
     };
@@ -700,7 +850,7 @@ function setupWebSocket() {
                 // Apply the initial state
                 if (data.state && data.state.actions) {
                     history = data.state.actions;
-                    redraw();
+                redraw();
                 }
                 
                 // Update board selector
@@ -715,7 +865,7 @@ function setupWebSocket() {
             } else if (data.type === 'boards_list') {
                 // Update the list of boards
                 boards = data.boards || [];
-                updateBoardSelector();
+                    updateBoardSelector();
             } else if (data.type === 'board_state') {
                 // Handle board state update
                 if (data.boardId) {
@@ -725,8 +875,8 @@ function setupWebSocket() {
                     if (data.state && data.state.actions) {
                         history = data.state.actions;
                         redoStack = []; // Clear redo stack when switching boards
-                        redraw();
-                        updateBoardSelector();
+                    redraw();
+                    updateBoardSelector();
                         
                         // Update UI based on write access
                         updateWriteAccessUI(data.canWrite);
@@ -743,9 +893,9 @@ function setupWebSocket() {
             } else if (data.type === 'clear') {
                 // Handle board clear
                 if (data.boardId === currentBoardId) {
-                    history = [];
-                    redoStack = [];
-                    redraw();
+                history = [];
+                redoStack = [];
+                redraw();
                 }
             } else if (data.type === 'clear_user') {
                 // Handle clearing a specific user's content
@@ -757,7 +907,7 @@ function setupWebSocket() {
                 // Handle full state update
                 if (data.boardId === currentBoardId && data.state && data.state.actions) {
                     history = data.state.actions;
-                    redraw();
+                redraw();
                 }
             } else if (data.type === 'user_update') {
                 // Handle user updates (e.g., username changes)
@@ -822,21 +972,32 @@ function createAdminPanel() {
     const toggleButton = document.createElement('button');
     toggleButton.className = 'tool-button';
     toggleButton.setAttribute('data-tooltip', 'Toggle Admin Panel');
-    toggleButton.innerHTML = '<i class="fas fa-chevron-right"></i>';
+    toggleButton.innerHTML = '<i class="fas fa-chevron-left"></i>';
     toggleButton.addEventListener('click', () => {
         adminPanel.classList.toggle('collapsed');
         
         // Update the icon
         const icon = toggleButton.querySelector('i');
         if (adminPanel.classList.contains('collapsed')) {
-            icon.className = 'fas fa-chevron-left';
-        } else {
             icon.className = 'fas fa-chevron-right';
+        } else {
+            icon.className = 'fas fa-chevron-left';
         }
     });
     
     panelHeader.appendChild(panelTitle);
     panelHeader.appendChild(toggleButton);
+    
+    // Create external toggle button (visible when panel is collapsed)
+    const externalToggle = document.createElement('button');
+    externalToggle.className = 'panel-toggle';
+    externalToggle.innerHTML = '<i class="fas fa-cog"></i>';
+    externalToggle.setAttribute('data-tooltip', 'Open Admin Panel');
+    externalToggle.addEventListener('click', () => {
+        adminPanel.classList.remove('collapsed');
+        toggleButton.querySelector('i').className = 'fas fa-chevron-left';
+    });
+    adminPanel.appendChild(externalToggle);
     
     // Create panel content
     const panelContent = document.createElement('div');
@@ -847,7 +1008,7 @@ function createAdminPanel() {
     usersSection.className = 'admin-section';
     
     const usersTitle = document.createElement('h4');
-    usersTitle.textContent = 'Users';
+    usersTitle.textContent = 'Connected Users';
     
     const usersList = document.createElement('div');
     usersList.id = 'users-list';
@@ -861,14 +1022,28 @@ function createAdminPanel() {
     accessSection.className = 'admin-section';
     
     const accessTitle = document.createElement('h4');
-    accessTitle.textContent = 'Access Rights';
+    accessTitle.textContent = 'Board Access Rights';
     
     const accessList = document.createElement('div');
     accessList.id = 'access-list';
     accessList.className = 'admin-list';
     
+    // Add help text for access rights
+    const accessHelp = document.createElement('div');
+    accessHelp.className = 'access-help';
+    accessHelp.innerHTML = `
+        <p><strong>How to manage permissions:</strong></p>
+        <ul>
+            <li>Check "Read" to allow a user to view the board</li>
+            <li>Check "Write" to allow a user to draw on the board</li>
+            <li>The "Everyone" option applies to all users</li>
+            <li>Admins always have full access to all boards</li>
+        </ul>
+    `;
+    
     accessSection.appendChild(accessTitle);
     accessSection.appendChild(accessList);
+    accessSection.appendChild(accessHelp);
     
     // Add sections to panel content
     panelContent.appendChild(usersSection);
@@ -928,6 +1103,13 @@ function updateAdminPanel() {
         // Get current board ID
         const boardId = currentBoardId;
         
+        // Create board name display
+        const boardName = document.createElement('h5');
+        boardName.style.marginTop = '0';
+        boardName.style.marginBottom = '10px';
+        boardName.textContent = `Current Board: ${boards.find(b => b.id === boardId)?.name || boardId}`;
+        accessList.appendChild(boardName);
+        
         // Create access rights table
         const accessTable = document.createElement('table');
         accessTable.className = 'access-table';
@@ -958,6 +1140,7 @@ function updateAdminPanel() {
         
         const everyoneCell = document.createElement('td');
         everyoneCell.textContent = 'Everyone';
+        everyoneCell.style.fontWeight = 'bold';
         
         const everyoneReadCell = document.createElement('td');
         const everyoneReadCheckbox = document.createElement('input');
@@ -1065,3 +1248,12 @@ function updateWriteAccessUI(canWrite) {
         setTool('pan');
     }
 }
+
+// Call init function when page loads
+document.addEventListener('DOMContentLoaded', () => {
+    // Initialize username first
+    initUsername();
+    
+    // Then initialize whiteboard
+    initWhiteboard();
+});
