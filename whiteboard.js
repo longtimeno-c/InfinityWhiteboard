@@ -39,6 +39,12 @@ const FRICTION = 0.92;
 let rafId = null;
 let socket; // WebSocket connection
 
+// Admin panel elements
+let adminPanel = null;
+let isAdmin = false;
+let connectedUsers = [];
+let boardAccessRights = {};
+
 ctx.lineCap = 'round';
 ctx.lineJoin = 'round';
 drawingCtx.lineCap = 'round';
@@ -98,10 +104,12 @@ function saveUsername() {
         hideUsernameModal();
         
         // Send username to server
-        socket.send(JSON.stringify({ 
-            type: 'username', 
-            username: username 
-        }));
+        if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({
+                type: 'username',
+                username: username
+            }));
+        }
     }
 }
 
@@ -132,14 +140,20 @@ function initUsername() {
 function switchBoard(boardId) {
     if (boardId === currentBoardId) return;
     
-    // Send switch board command to server
-    socket.send(JSON.stringify({
-        type: 'switch_board',
-        boardId: boardId
-    }));
-    
-    // Update UI to show loading state
-    updateBoardSelector();
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        // Send board switch request to server
+        socket.send(JSON.stringify({
+            type: 'switch_board',
+            boardId: boardId
+        }));
+        
+        // Update admin panel if admin
+        if (isAdmin && adminPanel) {
+            setTimeout(() => {
+                updateAdminPanel();
+            }, 500);
+        }
+    }
 }
 
 function createBoard() {
@@ -193,59 +207,107 @@ function updateBoardSelector() {
     // Clear existing options
     boardSelector.innerHTML = '';
     
-    // Add boards to selector
+    // Add each board as an option
     boards.forEach(board => {
-        const option = document.createElement('div');
-        option.className = 'board-option';
+        const boardItem = document.createElement('div');
+        boardItem.className = 'board-item';
         if (board.id === currentBoardId) {
-            option.classList.add('active');
+            boardItem.classList.add('active');
         }
         
-        // Create board name element
-        const nameEl = document.createElement('span');
-        nameEl.className = 'board-name';
-        nameEl.textContent = board.name;
-        nameEl.addEventListener('click', () => switchBoard(board.id));
-        option.appendChild(nameEl);
+        // Add access indicator if admin
+        if (isAdmin && boardAccessRights[board.id]) {
+            const accessIndicator = document.createElement('span');
+            accessIndicator.className = 'access-indicator';
+            
+            if (boardAccessRights[board.id].writeAccess.includes('*')) {
+                accessIndicator.textContent = '👥'; // Public write
+                accessIndicator.title = 'Public Write Access';
+            } else if (boardAccessRights[board.id].readAccess.includes('*')) {
+                accessIndicator.textContent = '👁️'; // Public read
+                accessIndicator.title = 'Public Read Access';
+            } else {
+                accessIndicator.textContent = '🔒'; // Private
+                accessIndicator.title = 'Private Access';
+            }
+            
+            boardItem.appendChild(accessIndicator);
+        }
         
-        // Create board actions container
-        const actionsEl = document.createElement('div');
-        actionsEl.className = 'board-actions';
+        const boardName = document.createElement('span');
+        boardName.className = 'board-name';
+        boardName.textContent = board.name;
+        boardItem.appendChild(boardName);
         
-        // Add rename button
-        const renameBtn = document.createElement('button');
-        renameBtn.className = 'board-action-btn';
-        renameBtn.innerHTML = '<i class="fas fa-edit"></i>';
-        renameBtn.title = 'Rename board';
-        renameBtn.addEventListener('click', (e) => {
+        // Add action buttons
+        const actionButtons = document.createElement('div');
+        actionButtons.className = 'board-actions';
+        
+        // Switch button
+        const switchButton = document.createElement('button');
+        switchButton.className = 'board-action-btn';
+        switchButton.innerHTML = '<i class="fas fa-arrow-right"></i>';
+        switchButton.title = 'Switch to this board';
+        switchButton.addEventListener('click', (e) => {
             e.stopPropagation();
-            renameBoard(board.id);
+            switchBoard(board.id);
         });
-        actionsEl.appendChild(renameBtn);
+        actionButtons.appendChild(switchButton);
         
-        // Add delete button (except for default board)
-        if (board.id !== 'default') {
-            const deleteBtn = document.createElement('button');
-            deleteBtn.className = 'board-action-btn';
-            deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
-            deleteBtn.title = 'Delete board';
-            deleteBtn.addEventListener('click', (e) => {
+        // Rename button (admin only or if current board)
+        if (isAdmin || board.id === currentBoardId) {
+            const renameButton = document.createElement('button');
+            renameButton.className = 'board-action-btn';
+            renameButton.innerHTML = '<i class="fas fa-edit"></i>';
+            renameButton.title = 'Rename board';
+            renameButton.addEventListener('click', (e) => {
                 e.stopPropagation();
-                deleteBoard(board.id);
+                const newName = prompt('Enter new board name:', board.name);
+                if (newName && newName.trim() !== '') {
+                    socket.send(JSON.stringify({
+                        type: 'rename_board',
+                        boardId: board.id,
+                        name: newName.trim()
+                    }));
+                }
             });
-            actionsEl.appendChild(deleteBtn);
+            actionButtons.appendChild(renameButton);
         }
         
-        option.appendChild(actionsEl);
-        boardSelector.appendChild(option);
+        // Delete button (admin only)
+        if (isAdmin && board.id !== 'default') {
+            const deleteButton = document.createElement('button');
+            deleteButton.className = 'board-action-btn delete-btn';
+            deleteButton.innerHTML = '<i class="fas fa-trash"></i>';
+            deleteButton.title = 'Delete board';
+            deleteButton.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (confirm(`Are you sure you want to delete the board "${board.name}"?`)) {
+                    socket.send(JSON.stringify({
+                        type: 'delete_board',
+                        boardId: board.id
+                    }));
+                }
+            });
+            actionButtons.appendChild(deleteButton);
+        }
+        
+        boardItem.appendChild(actionButtons);
+        
+        // Add click handler for the whole item
+        boardItem.addEventListener('click', () => {
+            switchBoard(board.id);
+        });
+        
+        boardSelector.appendChild(boardItem);
     });
     
-    // Add "Create new board" button
-    const createBoardBtn = document.createElement('div');
-    createBoardBtn.className = 'create-board-btn';
-    createBoardBtn.innerHTML = '<i class="fas fa-plus"></i> New Board';
-    createBoardBtn.addEventListener('click', createBoard);
-    boardSelector.appendChild(createBoardBtn);
+    // Add "Create New Board" button
+    const createBoardItem = document.createElement('div');
+    createBoardItem.className = 'board-item create-board';
+    createBoardItem.innerHTML = '<i class="fas fa-plus"></i> Create New Board';
+    createBoardItem.addEventListener('click', createBoard);
+    boardSelector.appendChild(createBoardItem);
 }
 
 function resizeCanvas() {
@@ -570,6 +632,9 @@ function initWhiteboard() {
         console.log('Initial whiteboard setup complete');
         redraw();
     }, 500);
+    
+    // Setup WebSocket connection
+    setupWebSocket();
 }
 
 // Call init function when page loads
@@ -579,15 +644,14 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Then initialize whiteboard and WebSocket
     initWhiteboard();
-    
-    // Setup WebSocket after username is initialized
-    socket = setupWebSocket();
 });
 
 function setupWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}`;
-    const socket = new WebSocket(wsUrl);
+    
+    console.log(`Connecting to WebSocket at ${wsUrl}`);
+    socket = new WebSocket(wsUrl);
     
     socket.onopen = () => {
         console.log('WebSocket connection established');
@@ -596,9 +660,9 @@ function setupWebSocket() {
         
         // Send username if available
         if (username) {
-            socket.send(JSON.stringify({ 
-                type: 'username', 
-                username: username 
+            socket.send(JSON.stringify({
+                type: 'username',
+                username: username
             }));
         }
     };
@@ -617,8 +681,8 @@ function setupWebSocket() {
     
     socket.onerror = (error) => {
         console.error('WebSocket error:', error);
-        status.textContent = 'Connection Error';
-        status.className = 'disconnected';
+        status.textContent = 'Error';
+        status.className = 'error';
     };
     
     socket.onmessage = (event) => {
@@ -626,93 +690,378 @@ function setupWebSocket() {
             const data = JSON.parse(event.data);
             
             if (data.type === 'init') {
-                console.log('Received initial state');
-                history = data.state.actions || [];
-                currentBoardId = data.boardId || 'default';
+                // Handle initial state
+                currentBoardId = data.boardId;
+                boards = data.boards || [];
                 
-                // Store the list of boards
-                if (data.boards) {
-                    boards = data.boards;
-                    updateBoardSelector();
+                // Set client ID
+                clientId = data.clientId;
+                
+                // Apply the initial state
+                if (data.state && data.state.actions) {
+                    history = data.state.actions;
+                    redraw();
                 }
                 
-                redraw();
+                // Update board selector
+                updateBoardSelector();
+                
+                // Request users list if admin
+                if (isAdmin) {
+                    socket.send(JSON.stringify({
+                        type: 'get_users'
+                    }));
+                }
             } else if (data.type === 'boards_list') {
                 // Update the list of boards
-                if (data.boards) {
-                    boards = data.boards;
-                    updateBoardSelector();
-                }
+                boards = data.boards || [];
+                updateBoardSelector();
             } else if (data.type === 'board_state') {
-                // Handle board state update (when switching boards)
+                // Handle board state update
                 if (data.boardId) {
                     currentBoardId = data.boardId;
-                    history = data.state.actions || [];
-                    redoStack = [];
-                    scale = 1;
-                    offsetX = 0;
-                    offsetY = 0;
-                    redraw();
-                    updateBoardSelector();
+                    
+                    // Apply the board state
+                    if (data.state && data.state.actions) {
+                        history = data.state.actions;
+                        redoStack = []; // Clear redo stack when switching boards
+                        redraw();
+                        updateBoardSelector();
+                        
+                        // Update UI based on write access
+                        updateWriteAccessUI(data.canWrite);
+                    }
                 }
             } else if (data.type === 'draw') {
                 // Handle drawing from other clients
-                const stroke = {
-                    type: 'draw',
-                    tool: data.tool || 'pen',
-                    color: data.color,
-                    size: data.size,
-                    points: data.points
-                };
-                history.push(stroke);
+                history.push(data);
                 redraw();
             } else if (data.type === 'erase') {
                 // Handle erasing from other clients
-                const stroke = {
-                    type: 'erase',
-                    tool: 'eraser',
-                    size: data.size,
-                    points: data.points
-                };
-                history.push(stroke);
+                history.push(data);
                 redraw();
             } else if (data.type === 'clear') {
                 // Handle board clear
-                history = [];
-                redoStack = [];
-                redraw();
-            } else if (data.type === 'clear_user') {
-                // Handle clearing a specific user's content
-                if (data.username) {
-                    // Filter out the specified user's strokes
-                    history = history.filter(stroke => stroke.username !== data.username);
+                if (data.boardId === currentBoardId) {
+                    history = [];
+                    redoStack = [];
                     redraw();
                 }
-            } else if (data.type === 'pan') {
-                // Handle pan updates from other clients
-                offsetX = data.offsetX;
-                offsetY = data.offsetY;
-                redraw();
-            } else if (data.type === 'zoom') {
-                // Handle zoom updates from other clients
-                scale = data.scale;
-                redraw();
+            } else if (data.type === 'clear_user') {
+                // Handle clearing a specific user's content
+                if (data.boardId === currentBoardId) {
+                    history = history.filter(action => action.username !== data.username);
+                    redraw();
+                }
+            } else if (data.type === 'update') {
+                // Handle full state update
+                if (data.boardId === currentBoardId && data.state && data.state.actions) {
+                    history = data.state.actions;
+                    redraw();
+                }
             } else if (data.type === 'user_update') {
-                // Handle username updates from other clients
-                console.log(`User ${data.clientId} is now known as ${data.username}`);
-                // You could display this information in a users list if you add that feature
+                // Handle user updates (e.g., username changes)
+                console.log(`User ${data.username} (${data.clientId}) updated`);
+                // You could update a users list if you add that feature
             } else if (data.type === 'user_disconnect') {
                 // Handle user disconnection
                 console.log(`User ${data.username} (${data.clientId}) disconnected`);
                 // You could update a users list if you add that feature
+            } else if (data.type === 'admin_status') {
+                isAdmin = data.isAdmin;
+                
+                // Show admin panel if user is admin
+                if (isAdmin) {
+                    createAdminPanel();
+                    
+                    // Request users list
+                    socket.send(JSON.stringify({
+                        type: 'get_users'
+                    }));
+                }
+            } else if (data.type === 'users_list') {
+                // Update connected users list for admin
+                connectedUsers = data.users;
+                updateAdminPanel();
+            } else if (data.type === 'access_rights') {
+                // Update access rights for admin
+                boardAccessRights = data.boardAccess;
+                updateAdminPanel();
+            } else if (data.type === 'write_access') {
+                // Update UI based on write access
+                updateWriteAccessUI(data.canWrite);
             } else if (data.type === 'error') {
-                // Handle error messages from the server
-                alert(data.message || 'An error occurred');
+                // Display error message
+                alert(data.message);
             }
         } catch (error) {
-            console.error('Error processing message:', error);
+            console.error('Error parsing message:', error);
         }
     };
+}
+
+// Function to create admin panel
+function createAdminPanel() {
+    // Check if admin panel already exists
+    if (document.getElementById('admin-panel')) {
+        return;
+    }
     
-    return socket;
+    // Create admin panel
+    adminPanel = document.createElement('div');
+    adminPanel.id = 'admin-panel';
+    adminPanel.className = 'panel';
+    
+    // Create panel header
+    const panelHeader = document.createElement('div');
+    panelHeader.className = 'panel-header';
+    
+    const panelTitle = document.createElement('h3');
+    panelTitle.textContent = 'Admin Panel';
+    
+    const toggleButton = document.createElement('button');
+    toggleButton.className = 'tool-button';
+    toggleButton.setAttribute('data-tooltip', 'Toggle Admin Panel');
+    toggleButton.innerHTML = '<i class="fas fa-chevron-right"></i>';
+    toggleButton.addEventListener('click', () => {
+        adminPanel.classList.toggle('collapsed');
+        
+        // Update the icon
+        const icon = toggleButton.querySelector('i');
+        if (adminPanel.classList.contains('collapsed')) {
+            icon.className = 'fas fa-chevron-left';
+        } else {
+            icon.className = 'fas fa-chevron-right';
+        }
+    });
+    
+    panelHeader.appendChild(panelTitle);
+    panelHeader.appendChild(toggleButton);
+    
+    // Create panel content
+    const panelContent = document.createElement('div');
+    panelContent.className = 'panel-content';
+    
+    // Create users section
+    const usersSection = document.createElement('div');
+    usersSection.className = 'admin-section';
+    
+    const usersTitle = document.createElement('h4');
+    usersTitle.textContent = 'Users';
+    
+    const usersList = document.createElement('div');
+    usersList.id = 'users-list';
+    usersList.className = 'admin-list';
+    
+    usersSection.appendChild(usersTitle);
+    usersSection.appendChild(usersList);
+    
+    // Create access rights section
+    const accessSection = document.createElement('div');
+    accessSection.className = 'admin-section';
+    
+    const accessTitle = document.createElement('h4');
+    accessTitle.textContent = 'Access Rights';
+    
+    const accessList = document.createElement('div');
+    accessList.id = 'access-list';
+    accessList.className = 'admin-list';
+    
+    accessSection.appendChild(accessTitle);
+    accessSection.appendChild(accessList);
+    
+    // Add sections to panel content
+    panelContent.appendChild(usersSection);
+    panelContent.appendChild(accessSection);
+    
+    // Add header and content to panel
+    adminPanel.appendChild(panelHeader);
+    adminPanel.appendChild(panelContent);
+    
+    // Add panel to document
+    document.body.appendChild(adminPanel);
+    
+    // Update admin panel
+    updateAdminPanel();
+}
+
+// Function to update admin panel
+function updateAdminPanel() {
+    if (!adminPanel || !isAdmin) {
+        return;
+    }
+    
+    // Update users list
+    const usersList = document.getElementById('users-list');
+    usersList.innerHTML = '';
+    
+    if (connectedUsers.length === 0) {
+        const noUsers = document.createElement('p');
+        noUsers.textContent = 'No users found';
+        usersList.appendChild(noUsers);
+    } else {
+        connectedUsers.forEach(user => {
+            const userItem = document.createElement('div');
+            userItem.className = 'admin-item';
+            
+            const userName = document.createElement('span');
+            userName.textContent = user.username;
+            if (user.isAdmin) {
+                userName.className = 'admin-user';
+                userName.textContent += ' (Admin)';
+            }
+            
+            userItem.appendChild(userName);
+            usersList.appendChild(userItem);
+        });
+    }
+    
+    // Update access rights list
+    const accessList = document.getElementById('access-list');
+    accessList.innerHTML = '';
+    
+    if (Object.keys(boardAccessRights).length === 0) {
+        const noAccess = document.createElement('p');
+        noAccess.textContent = 'No access rights found';
+        accessList.appendChild(noAccess);
+    } else {
+        // Get current board ID
+        const boardId = currentBoardId;
+        
+        // Create access rights table
+        const accessTable = document.createElement('table');
+        accessTable.className = 'access-table';
+        
+        // Create table header
+        const tableHeader = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+        
+        const userHeader = document.createElement('th');
+        userHeader.textContent = 'User';
+        
+        const readHeader = document.createElement('th');
+        readHeader.textContent = 'Read';
+        
+        const writeHeader = document.createElement('th');
+        writeHeader.textContent = 'Write';
+        
+        headerRow.appendChild(userHeader);
+        headerRow.appendChild(readHeader);
+        headerRow.appendChild(writeHeader);
+        tableHeader.appendChild(headerRow);
+        
+        // Create table body
+        const tableBody = document.createElement('tbody');
+        
+        // Add row for everyone (*)
+        const everyoneRow = document.createElement('tr');
+        
+        const everyoneCell = document.createElement('td');
+        everyoneCell.textContent = 'Everyone';
+        
+        const everyoneReadCell = document.createElement('td');
+        const everyoneReadCheckbox = document.createElement('input');
+        everyoneReadCheckbox.type = 'checkbox';
+        everyoneReadCheckbox.checked = boardAccessRights[boardId]?.readAccess.includes('*') || false;
+        everyoneReadCheckbox.addEventListener('change', () => {
+            updateAccessRights(boardId, '*', everyoneReadCheckbox.checked, everyoneWriteCheckbox.checked);
+        });
+        everyoneReadCell.appendChild(everyoneReadCheckbox);
+        
+        const everyoneWriteCell = document.createElement('td');
+        const everyoneWriteCheckbox = document.createElement('input');
+        everyoneWriteCheckbox.type = 'checkbox';
+        everyoneWriteCheckbox.checked = boardAccessRights[boardId]?.writeAccess.includes('*') || false;
+        everyoneWriteCheckbox.addEventListener('change', () => {
+            updateAccessRights(boardId, '*', everyoneReadCheckbox.checked, everyoneWriteCheckbox.checked);
+        });
+        everyoneWriteCell.appendChild(everyoneWriteCheckbox);
+        
+        everyoneRow.appendChild(everyoneCell);
+        everyoneRow.appendChild(everyoneReadCell);
+        everyoneRow.appendChild(everyoneWriteCell);
+        tableBody.appendChild(everyoneRow);
+        
+        // Add rows for each user
+        connectedUsers.forEach(user => {
+            if (user.isAdmin) {
+                return; // Skip admins as they always have access
+            }
+            
+            const userRow = document.createElement('tr');
+            
+            const userCell = document.createElement('td');
+            userCell.textContent = user.username;
+            
+            const readCell = document.createElement('td');
+            const readCheckbox = document.createElement('input');
+            readCheckbox.type = 'checkbox';
+            readCheckbox.checked = boardAccessRights[boardId]?.readAccess.includes(user.username) || false;
+            readCheckbox.addEventListener('change', () => {
+                updateAccessRights(boardId, user.username, readCheckbox.checked, writeCheckbox.checked);
+            });
+            readCell.appendChild(readCheckbox);
+            
+            const writeCell = document.createElement('td');
+            const writeCheckbox = document.createElement('input');
+            writeCheckbox.type = 'checkbox';
+            writeCheckbox.checked = boardAccessRights[boardId]?.writeAccess.includes(user.username) || false;
+            writeCheckbox.addEventListener('change', () => {
+                updateAccessRights(boardId, user.username, readCheckbox.checked, writeCheckbox.checked);
+            });
+            writeCell.appendChild(writeCheckbox);
+            
+            userRow.appendChild(userCell);
+            userRow.appendChild(readCell);
+            userRow.appendChild(writeCell);
+            tableBody.appendChild(userRow);
+        });
+        
+        accessTable.appendChild(tableHeader);
+        accessTable.appendChild(tableBody);
+        accessList.appendChild(accessTable);
+    }
+}
+
+// Function to update access rights
+function updateAccessRights(boardId, username, readAccess, writeAccess) {
+    if (!isAdmin || !socket || socket.readyState !== WebSocket.OPEN) {
+        return;
+    }
+    
+    socket.send(JSON.stringify({
+        type: 'update_access',
+        boardId: boardId,
+        username: username,
+        readAccess: readAccess,
+        writeAccess: writeAccess
+    }));
+}
+
+// Function to update UI based on write access
+function updateWriteAccessUI(canWrite) {
+    // Disable drawing tools if user doesn't have write access
+    const drawingTools = [
+        document.getElementById('penTool'),
+        document.getElementById('eraserTool'),
+        document.getElementById('colorPicker'),
+        document.getElementById('size')
+    ];
+    
+    drawingTools.forEach(tool => {
+        if (tool) {
+            if (canWrite) {
+                tool.removeAttribute('disabled');
+                tool.classList.remove('disabled');
+            } else {
+                tool.setAttribute('disabled', 'disabled');
+                tool.classList.add('disabled');
+            }
+        }
+    });
+    
+    // Update tool state if needed
+    if (!canWrite && (tool === 'pen' || tool === 'eraser')) {
+        setTool('pan');
+    }
 }
