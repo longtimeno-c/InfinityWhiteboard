@@ -4,364 +4,88 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Infinite Whiteboard</title>
-    <style>
-        body {
-            margin: 0;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
-        #toolbar {
-            padding: 10px;
-            background: #f0f0f0;
-            width: 100%;
-            text-align: center;
-        }
-        #whiteboard {
-            border: 1px solid #000;
-            cursor: crosshair;
-            touch-action: none;
-        }
-        #status {
-            position: fixed;
-            bottom: 10px;
-            right: 10px;
-            padding: 5px 10px;
-            border-radius: 3px;
-        }
-        .connected { background: #90ee90; }
-        .disconnected { background: #ff9999; }
-        .tool-button {
-            padding: 5px 10px;
-            margin: 0 5px;
-            border: 2px solid #ccc;
-            border-radius: 5px;
-            background: #fff;
-            cursor: pointer;
-        }
-        .tool-button.active {
-            background: #4CAF50;
-            color: white;
-            border-color: #4CAF50;
-        }
-        select, input[type="range"] {
-            margin: 0 5px;
-        }
-    </style>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
     <div id="toolbar">
-        <button id="penTool" class="tool-button active" onclick="setTool('pen')">Pen</button>
-        <select id="colorPicker" onchange="setColor(this.value)">
-            <option value="black">Black</option>
-            <option value="red">Red</option>
-            <option value="blue">Blue</option>
-            <option value="green">Green</option>
-        </select>
-        <button id="eraserTool" class="tool-button" onclick="setTool('eraser')">Eraser</button>
-        <button id="panTool" class="tool-button" onclick="setTool('pan')">Pan</button>
-        <button class="tool-button" onclick="clearBoard()">Clear</button>
-        <button class="tool-button" onclick="undo()">Undo</button>
-        <button class="tool-button" onclick="redo()">Redo</button>
+        <button id="penTool" class="tool-button active" data-tooltip="Pen (P)" onclick="setTool('pen')">
+            <i class="fas fa-pen"></i>
+        </button>
+        <input type="color" id="colorPicker" value="#000000" onchange="setColor(this.value)">
+        <button id="eraserTool" class="tool-button" data-tooltip="Eraser (E)" onclick="setTool('eraser')">
+            <i class="fas fa-eraser"></i>
+        </button>
+        <button id="panTool" class="tool-button" data-tooltip="Pan (Space)" onclick="setTool('pan')">
+            <i class="fas fa-hand"></i>
+        </button>
+        <button class="tool-button" data-tooltip="Clear Board" onclick="clearBoardWithConfirm()">
+            <i class="fas fa-trash"></i>
+        </button>
+        <button class="tool-button" data-tooltip="Undo (Ctrl+Z)" onclick="undo()">
+            <i class="fas fa-undo"></i>
+        </button>
+        <button class="tool-button" data-tooltip="Redo (Ctrl+Y)" onclick="redo()">
+            <i class="fas fa-redo"></i>
+        </button>
         <input type="range" id="size" min="1" max="20" value="2" onchange="setSize(this.value)">
-        <button class="tool-button" onclick="zoom(1.2)">Zoom In</button>
-        <button class="tool-button" onclick="zoom(0.8)">Zoom Out</button>
+        <button class="tool-button" data-tooltip="Zoom In" onclick="zoom(1.2)">
+            <i class="fas fa-search-plus"></i>
+        </button>
+        <button class="tool-button" data-tooltip="Zoom Out" onclick="zoom(0.8)">
+            <i class="fas fa-search-minus"></i>
+        </button>
+        
+        <!-- Username display in top right -->
+        <div id="username-container">
+            <span id="username-display"></span>
+            <button id="change-username-btn" class="tool-button" data-tooltip="Change Username">
+                <i class="fas fa-user-edit"></i>
+            </button>
+        </div>
     </div>
+    
+    <!-- Board selector panel -->
+    <div id="board-panel">
+        <div class="panel-header">
+            <h3>Boards</h3>
+        </div>
+        <div id="board-selector">
+            <!-- Board options will be added dynamically -->
+        </div>
+    </div>
+    
+    <!-- Board panel tab for reopening when collapsed -->
+    <button id="board-panel-tab">Boards</button>
+    <button id="admin-panel-tab">Admin</button>
+    
     <canvas id="whiteboard"></canvas>
     <div id="status" class="disconnected">Disconnected</div>
 
-    <script>
-        const canvas = document.getElementById('whiteboard');
-        const ctx = canvas.getContext('2d');
-        const drawingCanvas = document.createElement('canvas');
-        const drawingCtx = drawingCanvas.getContext('2d');
-        const status = document.getElementById('status');
-        let tool = 'pen';
-        let color = 'black';
-        let size = 2;
-        let drawing = false;
-        let lastX, lastY;
-        let history = [];
-        let redoStack = [];
-        let scale = 1;
-        let offsetX = 0, offsetY = 0;
-        let prevOffsetX = 0, prevOffsetY = 0;
-        const GRID_SIZE = 20;
-        let isPanning = false;
-        let panRafId = null;
-        const SMOOTHING_FACTOR = 0.5;
+    <!-- Username Modal -->
+    <div id="username-modal" class="modal">
+        <div class="modal-content">
+            <h2>Welcome to Infinite Whiteboard</h2>
+            <p>Please enter a username to continue:</p>
+            <input type="text" id="username-input" placeholder="Username">
+            <button id="save-username-btn">Save</button>
+        </div>
+    </div>
 
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        drawingCtx.lineCap = 'round';
-        drawingCtx.lineJoin = 'round';
+    <!-- Clear Options Modal -->
+    <div id="clear-options-modal" class="modal">
+        <div class="modal-content">
+            <h2>Clear Options</h2>
+            <p>What would you like to clear?</p>
+            <div class="modal-buttons">
+                <button id="clear-own-btn" class="primary-btn">Clear My Content</button>
+                <button id="clear-all-btn" class="danger-btn">Clear All Content</button>
+                <button id="cancel-clear-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
 
-        const penTool = document.getElementById('penTool');
-        const eraserTool = document.getElementById('eraserTool');
-        const panTool = document.getElementById('panTool');
-
-        function resizeCanvas() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight - document.getElementById('toolbar').offsetHeight;
-            drawingCanvas.width = canvas.width;
-            drawingCanvas.height = canvas.height;
-            redraw();
-        }
-        window.addEventListener('resize', resizeCanvas);
-        resizeCanvas();
-
-        function setTool(newTool) {
-            tool = newTool;
-            canvas.style.cursor = tool === 'pan' ? 'grab' : 'crosshair';
-            penTool.classList.toggle('active', tool === 'pen');
-            eraserTool.classList.toggle('active', tool === 'eraser');
-            panTool.classList.toggle('active', tool === 'pan');
-        }
-
-        function setColor(newColor) {
-            color = newColor;
-        }
-
-        function setSize(newSize) {
-            size = parseInt(newSize);
-        }
-
-        function zoom(factor) {
-            scale *= factor;
-            socket.send(JSON.stringify({ type: 'zoom', scale }));
-            redraw();
-        }
-
-        function clearBoard() {
-            history = [];
-            redoStack = [];
-            scale = 1;
-            offsetX = 0;
-            offsetY = 0;
-            drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
-            socket.send(JSON.stringify({ 
-                type: 'clear',
-                history: [],
-                scale: 1,
-                offsetX: 0,
-                offsetY: 0
-            }));
-            redraw();
-        }
-
-        function drawGrid() {
-            ctx.save();
-            ctx.setTransform(1, 0, 0, 1, offsetX, offsetY);
-            ctx.scale(scale, scale);
-
-            ctx.strokeStyle = '#e0e0e0';
-            ctx.lineWidth = 0.5 / scale;
-
-            const minX = -offsetX / scale;
-            const minY = -offsetY / scale;
-            const maxX = (canvas.width - offsetX) / scale;
-            const maxY = (canvas.height - offsetY) / scale;
-
-            for (let x = Math.floor(minX / GRID_SIZE) * GRID_SIZE; x <= maxX; x += GRID_SIZE) {
-                ctx.beginPath();
-                ctx.moveTo(x, minY);
-                ctx.lineTo(x, maxY);
-                ctx.stroke();
-            }
-            for (let y = Math.floor(minY / GRID_SIZE) * GRID_SIZE; y <= maxY; y += GRID_SIZE) {
-                ctx.beginPath();
-                ctx.moveTo(minX, y);
-                ctx.lineTo(maxX, y);
-                ctx.stroke();
-            }
-            ctx.restore();
-        }
-
-        canvas.addEventListener('pointerdown', startDrawing);
-        canvas.addEventListener('pointermove', draw);
-        canvas.addEventListener('pointerup', stopDrawing);
-        canvas.addEventListener('pointerleave', stopDrawing);
-        canvas.addEventListener('wheel', (e) => {
-            e.preventDefault();
-            zoom(e.deltaY > 0 ? 0.9 : 1.1);
-        });
-
-        function startDrawing(e) {
-            e.preventDefault();
-            drawing = true;
-            const rect = canvas.getBoundingClientRect();
-            const virtualX = (e.clientX - rect.left - offsetX) / scale;
-            const virtualY = (e.clientY - rect.top - offsetY) / scale;
-            [lastX, lastY] = [virtualX, virtualY];
-            if (tool === 'pan') {
-                canvas.style.cursor = 'grabbing';
-                prevOffsetX = offsetX;
-                prevOffsetY = offsetY;
-            }
-        }
-
-        function draw(e) {
-            e.preventDefault();
-            if (!drawing) return;
-
-            const rect = canvas.getBoundingClientRect();
-            const virtualX = (e.clientX - rect.left - offsetX) / scale;
-            const virtualY = (e.clientY - rect.top - offsetY) / scale;
-            const pressure = e.pressure || 1;
-
-            if (tool === 'pen' && e.buttons === 1) {
-                drawingCtx.beginPath();
-                drawingCtx.moveTo(lastX * scale + offsetX, lastY * scale + offsetY);
-                const midX = (lastX + virtualX) / 2;
-                const midY = (lastY + virtualY) / 2;
-                drawingCtx.quadraticCurveTo(lastX * scale + offsetX, lastY * scale + offsetY, midX * scale + offsetX, midY * scale + offsetY);
-                drawingCtx.lineTo(virtualX * scale + offsetX, virtualY * scale + offsetY);
-                drawingCtx.strokeStyle = color;
-                drawingCtx.lineWidth = size * scale * pressure;
-                drawingCtx.stroke();
-                const action = { type: 'draw', tool: 'pen', color, size: size * pressure, lastX, lastY, x: virtualX, y: virtualY };
-                history.push(action);
-                redoStack = [];
-                socket.send(JSON.stringify({ type: 'update', history, scale, offsetX, offsetY }));
-            } else if (tool === 'eraser' && e.buttons === 1) {
-                drawingCtx.globalCompositeOperation = 'destination-out';
-                drawingCtx.beginPath();
-                drawingCtx.arc(virtualX * scale + offsetX, virtualY * scale + offsetY, size * scale * pressure, 0, Math.PI * 2);
-                drawingCtx.fill();
-                drawingCtx.globalCompositeOperation = 'source-over';
-                const action = { type: 'draw', tool: 'eraser', size: size * pressure, x: virtualX, y: virtualY };
-                history.push(action);
-                redoStack = [];
-                socket.send(JSON.stringify({ type: 'update', history, scale, offsetX, offsetY }));
-            } else if (tool === 'pan') {
-                isPanning = true;
-                const deltaX = e.movementX;
-                const deltaY = e.movementY;
-                offsetX = prevOffsetX + (deltaX * SMOOTHING_FACTOR);
-                offsetY = prevOffsetY + (deltaY * SMOOTHING_FACTOR);
-                prevOffsetX = offsetX;
-                prevOffsetY = offsetY;
-                socket.send(JSON.stringify({ type: 'update', history, scale, offsetX, offsetY }));
-                if (!panRafId) {
-                    panRafId = requestAnimationFrame(() => {
-                        redraw();
-                        panRafId = null;
-                    });
-                }
-            }
-            [lastX, lastY] = [virtualX, virtualY];
-            if (tool !== 'pan') redraw();
-        }
-
-        function stopDrawing(e) {
-            drawing = false;
-            if (tool === 'pan') {
-                canvas.style.cursor = 'grab';
-                isPanning = false;
-                if (panRafId) {
-                    cancelAnimationFrame(panRafId);
-                    panRafId = null;
-                }
-            }
-        }
-
-        function undo() {
-            if (history.length === 0) return;
-            const action = history.pop();
-            redoStack.push(action);
-            socket.send(JSON.stringify({ type: 'update', history, scale, offsetX, offsetY }));
-            redraw();
-        }
-
-        function redo() {
-            if (redoStack.length === 0) return;
-            const action = redoStack.pop();
-            history.push(action);
-            socket.send(JSON.stringify({ type: 'update', history, scale, offsetX, offsetY }));
-            redraw();
-        }
-
-        function redraw() {
-            drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
-            drawingCtx.save();
-            drawingCtx.setTransform(1, 0, 0, 1, offsetX, offsetY);
-            drawingCtx.scale(scale, scale);
-
-            drawingCtx.globalCompositeOperation = 'source-over';
-            history.forEach(action => {
-                if (action.type === 'draw' && action.tool === 'pen') {
-                    drawingCtx.beginPath();
-                    drawingCtx.moveTo(action.lastX, action.lastY);
-                    const midX = (action.lastX + action.x) / 2;
-                    const midY = (action.lastY + action.y) / 2;
-                    drawingCtx.quadraticCurveTo(action.lastX, action.lastY, midX, midY);
-                    drawingCtx.lineTo(action.x, action.y);
-                    drawingCtx.strokeStyle = action.color;
-                    drawingCtx.lineWidth = action.size;
-                    drawingCtx.stroke();
-                } else if (action.type === 'draw' && action.tool === 'eraser') {
-                    drawingCtx.globalCompositeOperation = 'destination-out';
-                    drawingCtx.beginPath();
-                    drawingCtx.arc(action.x, action.y, action.size, 0, Math.PI * 2);
-                    drawingCtx.fill();
-                    drawingCtx.globalCompositeOperation = 'source-over';
-                }
-            });
-            drawingCtx.restore();
-
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            drawGrid();
-            ctx.drawImage(drawingCanvas, 0, 0);
-        }
-
-        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsHost = window.location.host;
-        const socket = new WebSocket(`${wsProtocol}//${wsHost}`);
-
-        socket.onopen = () => {
-            console.log('Connected to WebSocket server');
-            status.textContent = 'Connected';
-            status.className = 'connected';
-        };
-
-        socket.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            if (data.type === 'init') {
-                history = data.history || [];
-                scale = data.scale || 1;
-                offsetX = data.offsetX || 0;
-                offsetY = data.offsetY || 0;
-                redoStack = [];
-                redraw();
-            } else if (data.type === 'update') {
-                history = data.history || [];
-                scale = data.scale || 1;
-                offsetX = data.offsetX || 0;
-                offsetY = data.offsetY || 0;
-                redraw();
-            } else if (data.type === 'clear') {
-                history = [];
-                redoStack = [];
-                scale = data.scale || 1;
-                offsetX = data.offsetX || 0;
-                offsetY = data.offsetY || 0;
-                drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
-                redraw();
-            }
-        };
-
-        socket.onclose = () => {
-            console.log('Disconnected from WebSocket server');
-            status.textContent = 'Disconnected';
-            status.className = 'disconnected';
-        };
-
-        socket.onerror = (error) => {
-            console.error('WebSocket error:', error);
-            status.textContent = 'Error';
-            status.className = 'disconnected';
-        };
-    </script>
+    <script src="utils.js"></script>
+    <script src="whiteboard.js"></script>
 </body>
 </html>

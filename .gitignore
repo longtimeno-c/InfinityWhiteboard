@@ -9,6 +9,9 @@ dist/
 web-build/
 
 .env
+drawings.*
+whiteboard.json
+users.*
 
 # Native
 *.orig.*
