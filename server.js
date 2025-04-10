@@ -668,7 +668,7 @@ Promise.all([loadBoardsState(), loadUsersState()]).then(() => {
     app.use(express.static('.'));
 
     // Start the server
-    const PORT = process.env.PORT || 3001;
+    const PORT = process.env.PORT || 3010;
     server.listen(PORT, () => {
         console.log(`HTTP and WebSocket server running on http://localhost:${PORT}`);
         console.log(`Expect Caddy to proxy https://watch.stream150.com and wss://watch.stream150.com to this server`);

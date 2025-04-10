@@ -158,6 +158,11 @@ function switchBoard(boardId) {
 }
 
 function createBoard() {
+    if (!isAdmin) {
+        alert('You do not have permission to create a board.');
+        return;
+    }
+    
     const boardName = prompt('Enter a name for the new board:', `Board ${boards.length + 1}`);
     if (boardName) {
         // Send create board command to server
@@ -169,6 +174,11 @@ function createBoard() {
 }
 
 function renameBoard(boardId) {
+    if (!isAdmin) {
+        alert('You do not have permission to rename a board.');
+        return;
+    }
+    
     const board = boards.find(b => b.id === boardId);
     if (!board) return;
     
